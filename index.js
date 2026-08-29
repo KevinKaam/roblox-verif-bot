@@ -174,8 +174,8 @@ client.on('interactionCreate', async interaction => {
 
                 if (esOwner) {
                     embed.addFields({
-                        name: `👑 [${nombreGrupo}](${linkGrupo})`,
-                        value: `• **Estado:** ✅ **Apto para comprar en este grupo (Propietario)**`,
+                        name: `👑 ${nombreGrupo}`,
+                        value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• **Estado:** ✅ **Apto para comprar en este grupo (Propietario)**`,
                         inline: false
                     });
                 } else if (pertenencia && pertenencia.joined) {
@@ -184,8 +184,8 @@ client.on('interactionCreate', async interaction => {
                     
                     if (isNaN(fechaUnido.getTime())) {
                         embed.addFields({
-                            name: `🧱 [${nombreGrupo}](${linkGrupo})`,
-                            value: `• ⚠️ *No se pudo calcular la fecha exacta de unión.*`,
+                            name: `🧱 ${nombreGrupo}`,
+                            value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• ⚠️ *No se pudo calcular la fecha exacta de unión.*`,
                             inline: false
                         });
                         continue;
@@ -196,8 +196,8 @@ client.on('interactionCreate', async interaction => {
 
                     if (cumple) {
                         embed.addFields({
-                            name: `🧱 [${nombreGrupo}](${linkGrupo})`,
-                            value: `• **Antigüedad:** \`${dias} días\`\n• **Estado:** ✅ **Apto para comprar en este grupo**`,
+                            name: `🧱 ${nombreGrupo}`,
+                            value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• **Antigüedad:** \`${dias} días\`\n• **Estado:** ✅ **Apto para comprar en este grupo**`,
                             inline: false
                         });
                     } else {
@@ -206,15 +206,15 @@ client.on('interactionCreate', async interaction => {
                         const timestampUnix = Math.floor(fechaMeta.getTime() / 1000);
 
                         embed.addFields({
-                            name: `🧱 [${nombreGrupo}](${linkGrupo})`,
-                            value: `• **Antigüedad actual:** \`${dias} días\`\n• **Faltan:** \`${diasFaltantes} días\` (Disponible <t:${timestampUnix}:R>)`,
+                            name: `🧱 ${nombreGrupo}`,
+                            value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• **Antigüedad actual:** \`${dias} días\`\n• **Faltan:** \`${diasFaltantes} días\` (Disponible <t:${timestampUnix}:R>)`,
                             inline: false
                         });
                     }
                 } else {
                     embed.addFields({
-                        name: `🧱 [${nombreGrupo}](${linkGrupo})`,
-                        value: `• ❌ *El usuario no se encuentra unido a este grupo (o Roblox está actualizando la lista).*`,
+                        name: `🧱 ${nombreGrupo}`,
+                        value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• ❌ *El usuario no se encuentra unido a este grupo (o Roblox está actualizando la lista).*`,
                         inline: false
                     });
                 }
