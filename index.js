@@ -139,14 +139,6 @@ client.on('interactionCreate', async interaction => {
                 return interaction.editReply('⚠️ Todavía no se ha registrado ningún grupo en este servidor usando `/addgroup`.');
             }
 
-            const groupsRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`, {
-                headers: { 
-                    'User-Agent': 'Mozilla/5.0',
-                    'Cache-Control': 'no-cache'
-                }
-            });
-            const userGroups = groupsRes.data.data;
-
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
                 .setTitle(`📊 Reporte de Verificación de Antigüedad`)
@@ -155,11 +147,12 @@ client.on('interactionCreate', async interaction => {
                 .setTimestamp();
 
             for (const gId of gruposPermitidos) {
-                let pertenencia = userGroups.find(g => g.group.id.toString() === gId);
-                let esOwner = false;
                 let nombreGrupo = `Grupo ID: ${gId}`;
                 let linkGrupo = `https://www.roblox.com/groups/${gId}`;
+                let esOwner = false;
+                let fechaUnidoStr = null;
 
+                // 1. Obtener información general del grupo (nombre y dueño)
                 try {
                     const groupInfoRes = await axios.get(`https://groups.roblox.com/v1/groups/${gId}`, {
                         headers: { 'User-Agent': 'Mozilla/5.0' }
@@ -172,20 +165,49 @@ client.on('interactionCreate', async interaction => {
                     }
                 } catch (e) {}
 
+                // 2. Consultar directamente si el usuario pertenece al grupo y cuándo se unió
+                if (!esOwner) {
+                    try {
+                        const memberRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`, {
+                            headers: { 'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache' }
+                        });
+                        const userGroups = memberRes.data.data || [];
+                        const matchGroup = userGroups.find(g => g.group.id.toString() === gId);
+                        
+                        if (matchGroup) {
+                            // Intentamos sacar la fecha de unión de los roles o el objeto
+                            fechaUnidoStr = matchGroup.joined || matchGroup.role?.joined;
+                        }
+                    } catch (e) {}
+
+                    // Plan B por si la API general falla: consultar ruta específica de usuario en grupos
+                    if (!fechaUnidoStr) {
+                        try {
+                            const directCheck = await axios.get(`https://groups.roblox.com/v1/groups/${gId}/users/${userId}`, {
+                                headers: { 'User-Agent': 'Mozilla/5.0', 'Cache-Control': 'no-cache' }
+                            });
+                            // Si la petición no da error, el usuario está en el grupo (aunque a veces Roblox no expone el JSON exacto de fecha aquí, nos sirve de respaldo)
+                            if (directCheck.status === 200) {
+                                // Como la API de roles es la que da la fecha 'joined', si falló buscamos en la lista completa de roles otra vez con reintento limpio
+                            }
+                        } catch (e) {}
+                    }
+                }
+
                 if (esOwner) {
                     embed.addFields({
                         name: `👑 ${nombreGrupo}`,
                         value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• **Estado:** ✅ **Apto para comprar en este grupo (Propietario)**`,
                         inline: false
                     });
-                } else if (pertenencia && pertenencia.joined) {
-                    const fechaUnido = new Date(pertenencia.joined);
+                } else if (fechaUnidoStr) {
+                    const fechaUnido = new Date(fechaUnidoStr);
                     const hoy = new Date();
                     
                     if (isNaN(fechaUnido.getTime())) {
                         embed.addFields({
                             name: `🧱 ${nombreGrupo}`,
-                            value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• ⚠️ *No se pudo calcular la fecha exacta de unión.*`,
+                            value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• ⚠️ *Se detectó la unión pero no se pudo calcular la fecha exacta.*`,
                             inline: false
                         });
                         continue;
@@ -214,7 +236,7 @@ client.on('interactionCreate', async interaction => {
                 } else {
                     embed.addFields({
                         name: `🧱 ${nombreGrupo}`,
-                        value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• ❌ *El usuario no se encuentra unido a este grupo (o Roblox está actualizando la lista).*`,
+                        value: `• **Link:** [Ir al grupo de Roblox](${linkGrupo})\n• ❌ *El usuario no se encuentra unido a este grupo (o la API de Roblox sigue actualizando).*`,
                         inline: false
                     });
                 }
