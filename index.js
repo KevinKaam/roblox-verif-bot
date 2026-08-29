@@ -71,10 +71,14 @@ client.on('interactionCreate', async interaction => {
         const username = interaction.options.getString('username');
 
         try {
-            // Buscar ID de Roblox por el nombre de usuario
+            // Buscar ID de Roblox por el nombre de usuario (con User-Agent para evitar bloqueo de Render)
             const userRes = await axios.post('https://users.roblox.com/v1/users/search', {
                 keyword: username,
                 limit: 1
+            }, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                }
             });
 
             if (!userRes.data.data || userRes.data.data.length === 0) {
@@ -85,8 +89,12 @@ client.on('interactionCreate', async interaction => {
             const userId = robloxUser.id;
             const displayName = robloxUser.requestedUsername || robloxUser.name;
 
-            // Consultar los grupos del usuario en la API oficial
-            const groupsRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`);
+            // Consultar los grupos del usuario en la API oficial (también con User-Agent)
+            const groupsRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`, {
+                headers: {
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+                }
+            });
             const userGroups = groupsRes.data.data;
 
             if (gruposPermitidos.length === 0) {
