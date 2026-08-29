@@ -3,12 +3,10 @@ const axios = require('axios');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-// Si usas Glitch, estas credenciales las puedes jalar del archivo .env oculto
 const TOKEN = process.env.DISCORD_TOKEN || 'AQUI_TU_TOKEN';
 const CLIENT_ID = process.env.CLIENT_ID || 'AQUI_TU_CLIENT_ID';
 
-// Almacén temporal de grupos permitidos por el dueño o ID autorizada
-let gruposPermitidos = []; // Aquí puedes guardar las IDs de los grupos con /addgroup si lo manejas en memoria o JSON
+let gruposPermitidos = [];
 
 client.once('ready', async () => {
     console.log(`¡Bot activo en la web como ${client.user.tag}!`);
@@ -16,10 +14,10 @@ client.once('ready', async () => {
     const commands = [
         new SlashCommandBuilder()
             .setName('user')
-            .setDescription('Verifica los grupos de Roblox y los 15 días de antigüedad')
+            .setDescription('Verifica la antigüedad en los grupos de Roblox mediante ID o Link')
             .addStringOption(option => 
-                option.setName('username')
-                      .setDescription('Nombre de usuario de Roblox a consultar')
+                option.setName('user_input')
+                      .setDescription('ID de usuario de Roblox o Link de su perfil')
                       .setRequired(true)),
         new SlashCommandBuilder()
             .setName('addgroup')
@@ -42,7 +40,6 @@ client.once('ready', async () => {
 client.on('interactionCreate', async interaction => {
     if (!interaction.isChatInputCommand()) return;
 
-    // 1. COMANDO /addgroup (Restringido al dueño o ID específica: 1254918801569349676)
     if (interaction.commandName === 'addgroup') {
         const userIdPermitido = '1254918801569349676';
         if (interaction.user.id !== userIdPermitido && interaction.guild.ownerId !== interaction.user.id) {
@@ -50,7 +47,6 @@ client.on('interactionCreate', async interaction => {
         }
 
         const inputGroup = interaction.options.getString('group_id');
-        // Extraer solo los números por si meten el link completo
         const matchId = inputGroup.match(/\d+/);
         const groupId = matchId ? matchId[0] : null;
 
@@ -65,31 +61,30 @@ client.on('interactionCreate', async interaction => {
         return interaction.reply(`✅ ¡Grupo con ID **${groupId}** añadido correctamente a la lista de verificación!`);
     }
 
-    // 2. COMANDO /user
     if (interaction.commandName === 'user') {
         await interaction.deferReply();
-        const username = interaction.options.getString('username');
+        const userInput = interaction.options.getString('user_input');
+
+        // Extraer los números del ID o link del perfil
+        const matchId = userInput.match(/\d+/);
+        const userId = matchId ? matchId[0] : null;
+
+        if (!userId) {
+            return interaction.editReply('❌ Por favor introduce un ID de usuario de Roblox válido o un enlace de perfil correcto.');
+        }
 
         try {
-            // Buscar ID de Roblox por el nombre de usuario (con User-Agent para evitar bloqueo de Render)
-            const userRes = await axios.post('https://users.roblox.com/v1/users/search', {
-                keyword: username,
-                limit: 1
-            }, {
+            // Consultar datos del usuario directamente por su ID (100% funcional y sin bloqueos)
+            const userRes = await axios.get(`https://users.roblox.com/v1/users/${userId}`, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
                 }
             });
 
-            if (!userRes.data.data || userRes.data.data.length === 0) {
-                return interaction.editReply(`❌ No se encontró ningún usuario con el nombre **${username}** en Roblox.`);
-            }
+            const displayName = userRes.data.displayName || userRes.data.name;
+            const username = userRes.data.name;
 
-            const robloxUser = userRes.data.data[0];
-            const userId = robloxUser.id;
-            const displayName = robloxUser.requestedUsername || robloxUser.name;
-
-            // Consultar los grupos del usuario en la API oficial (también con User-Agent)
+            // Consultar los grupos del usuario
             const groupsRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`, {
                 headers: {
                     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
@@ -101,9 +96,8 @@ client.on('interactionCreate', async interaction => {
                 return interaction.editReply('⚠️ Todavía no se ha registrado ningún grupo con `/addgroup`. Pídele al dueño que añada uno.');
             }
 
-            let descripcion = `**Usuario:** ${displayName} (ID: \`${userId}\`)\n\n`;
+            let descripcion = `**Usuario:** ${displayName} (@${username}) (ID: \`${userId}\`)\n\n`;
 
-            // Revisar cada grupo que el dueño guardó
             gruposPermitidos.forEach(gId => {
                 const pertenencia = userGroups.find(g => g.group.id.toString() === gId);
                 
@@ -132,7 +126,7 @@ client.on('interactionCreate', async interaction => {
 
         } catch (error) {
             console.error(error);
-            await interaction.editReply('Hubo un fallo conectando con la API de Roblox. Inténtalo de nuevo más tarde.');
+            await interaction.editReply('❌ No se pudo encontrar ese usuario en Roblox o el ID es incorrecto.');
         }
     }
 });
