@@ -3,8 +3,8 @@ const axios = require('axios');
 
 const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
-const TOKEN = process.env.DISCORD_TOKEN || 'AQUI_TU_TOKEN';
-const CLIENT_ID = process.env.CLIENT_ID || 'AQUI_TU_CLIENT_ID';
+const TOKEN = process.env.DISCORD_TOKEN;
+const CLIENT_ID = process.env.CLIENT_ID;
 
 let gruposPermitidos = [];
 
@@ -14,10 +14,10 @@ client.once('ready', async () => {
     const commands = [
         new SlashCommandBuilder()
             .setName('user')
-            .setDescription('Verifica la antigüedad en los grupos de Roblox mediante ID o Link')
+            .setDescription('Verifica la antigüedad y estado en los grupos de Roblox')
             .addStringOption(option => 
                 option.setName('user_input')
-                      .setDescription('ID de usuario de Roblox o Link de su perfil')
+                      .setDescription('Nombre de usuario, ID o Link del perfil de Roblox')
                       .setRequired(true)),
         new SlashCommandBuilder()
             .setName('addgroup')
@@ -58,37 +58,56 @@ client.on('interactionCreate', async interaction => {
             gruposPermitidos.push(groupId);
         }
 
-        return interaction.reply(`✅ ¡Grupo con ID **${groupId}** añadido correctamente a la lista de verificación!`);
+        return interaction.reply({ content: `✅ ¡Grupo con ID **${groupId}** añadido correctamente a la lista de verificación!`, ephemeral: true });
     }
 
     if (interaction.commandName === 'user') {
         await interaction.deferReply();
-        const userInput = interaction.options.getString('user_input');
-
-        // Extraer los números del ID o link del perfil
-        const matchId = userInput.match(/\d+/);
-        const userId = matchId ? matchId[0] : null;
-
-        if (!userId) {
-            return interaction.editReply('❌ Por favor introduce un ID de usuario de Roblox válido o un enlace de perfil correcto.');
-        }
+        let userInput = interaction.options.getString('user_input').trim();
 
         try {
-            // Consultar datos del usuario directamente por su ID (100% funcional y sin bloqueos)
-            const userRes = await axios.get(`https://users.roblox.com/v1/users/${userId}`, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
+            let userId = null;
+
+            // Detectar si es un enlace o contiene solo números (ID directo)
+            const matchId = userInput.match(/\d+/);
+            if (/^\d+$/.test(userInput) || (matchId && userInput.includes('roblox.com/users/'))) {
+                userId = matchId ? matchId[0] : null;
+            } else {
+                // Si introdujo un nombre de usuario (ej: iKevs_Oficial), lo buscamos mediante la API oficial de Roblox
+                // Nota: Usamos el endpoint de usuarios por nombre a través del método POST de usuarios
+                const searchRes = await axios.post('https://users.roblox.com/v1/usernames/users', {
+                    usernames: [userInput],
+                    excludeBannedUsers: true
+                }, {
+                    headers: { 'User-Agent': 'Mozilla/5.0' }
+                });
+
+                if (searchRes.data && searchRes.data.data && searchRes.data.data.length > 0) {
+                    userId = searchRes.data.data[0].id.toString();
                 }
+            }
+
+            if (!userId) {
+                return interaction.editReply('❌ No se pudo encontrar ese usuario. Por favor introduce un nombre de usuario válido, ID o enlace de perfil.');
+            }
+
+            // Consultar datos principales del usuario
+            const userRes = await axios.get(`https://users.roblox.com/v1/users/${userId}`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' }
             });
 
             const displayName = userRes.data.displayName || userRes.data.name;
             const username = userRes.data.name;
 
+            // Obtener la cabeza/miniatura del avatar del usuario de Roblox
+            const thumbRes = await axios.get(`https://thumbnails.roblox.com/v1/users/avatar-headshot?userIds=${userId}&size=420x420&format=Png&isCircular=false`, {
+                headers: { 'User-Agent': 'Mozilla/5.0' }
+            });
+            const avatarUrl = thumbRes.data.data[0]?.imageUrl || 'https://www.roblox.com';
+
             // Consultar los grupos del usuario
             const groupsRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`, {
-                headers: {
-                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'
-                }
+                headers: { 'User-Agent': 'Mozilla/5.0' }
             });
             const userGroups = groupsRes.data.data;
 
@@ -96,37 +115,55 @@ client.on('interactionCreate', async interaction => {
                 return interaction.editReply('⚠️ Todavía no se ha registrado ningún grupo con `/addgroup`. Pídele al dueño que añada uno.');
             }
 
-            let descripcion = `**Usuario:** ${displayName} (@${username}) (ID: \`${userId}\`)\n\n`;
+            const embed = new EmbedBuilder()
+                .setColor(0x5865F2)
+                .setTitle(`📊 Reporte de Verificación`)
+                .setThumbnail(avatarUrl)
+                .setDescription(`**Perfil:** [${displayName} (@${username})](https://www.roblox.com/users/${userId}/profile)\n**ID:** \`${userId}\``)
+                .setTimestamp();
 
             gruposPermitidos.forEach(gId => {
                 const pertenencia = userGroups.find(g => g.group.id.toString() === gId);
                 
-                if (pertenencia) {
+                if (pertenencia && pertenencia.joined) {
                     const fechaUnido = new Date(pertenencia.joined);
                     const hoy = new Date();
+                    
+                    if (isNaN(fechaUnido.getTime())) {
+                        embed.addFields({
+                            name: `📦 Grupo: ${pertenencia.group.name} (\`${gId}\`)`,
+                            value: `⚠️ *No se pudo calcular la fecha exacta de unión.*`,
+                            inline: false
+                        });
+                        return;
+                    }
+
                     const dias = Math.floor((hoy - fechaUnido) / (1000 * 60 * 60 * 24));
                     const cumple = dias >= 15;
 
-                    descripcion += `📦 **Grupo ID:** \`${gId}\`\n`;
-                    descripcion += `• **Nombre:** ${pertenencia.group.name}\n`;
-                    descripcion += `• **Días en el grupo:** ${dias} días\n`;
-                    descripcion += `• **Estado:** ${cumple ? '✅ **Apto para pagos (Más de 15 días)**' : `❌ **Faltan ${15 - dias} días**`}\n\n`;
+                    let estadoTexto = cumple 
+                        ? `✅ **Apto para pagos** \`(${dias} días en el grupo)\`` 
+                        : `❌ **No apto** \`(Faltan ${15 - dias} días - Tiene ${dias} días)\``;
+
+                    embed.addFields({
+                        name: `📦 ${pertenencia.group.name}`,
+                        value: `• **ID del Grupo:** \`${gId}\`\n• **Estado:** ${estadoTexto}`,
+                        inline: false
+                    });
                 } else {
-                    descripcion += `📦 **Grupo ID:** \`${gId}\`\n• ❌ *El usuario no está unido a este grupo.*\n\n`;
+                    embed.addFields({
+                        name: `📦 Grupo ID: \`${gId}\``,
+                        value: `• ❌ *El usuario no se encuentra unido a este grupo.*`,
+                        inline: false
+                    });
                 }
             });
-
-            const embed = new EmbedBuilder()
-                .setTitle(`Reporte de Antigüedad: ${displayName}`)
-                .setColor(0x0099FF)
-                .setDescription(descripcion)
-                .setTimestamp();
 
             await interaction.editReply({ embeds: [embed] });
 
         } catch (error) {
             console.error(error);
-            await interaction.editReply('❌ No se pudo encontrar ese usuario en Roblox o el ID es incorrecto.');
+            await interaction.editReply('❌ Ocurrió un error al consultar la API de Roblox. Inténtalo de nuevo más tarde.');
         }
     }
 });
