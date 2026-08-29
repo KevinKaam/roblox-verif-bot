@@ -1,13 +1,14 @@
 {
-  "name": "roblox-discord-bot",
+  "name": "roblox-verif-bot",
   "version": "1.0.0",
-  "description": "Bot de verificacion de Roblox",
+  "description": "Bot de verificacion de Roblox para Discord",
   "main": "index.js",
   "scripts": {
     "start": "node index.js"
   },
   "dependencies": {
-    "axios": "^1.7.2",
-    "discord.js": "^14.15.3"
+    "axios": "^1.7.9",
+    "discord.js": "^14.17.3",
+    "express": "^4.21.2"
   }
 }
