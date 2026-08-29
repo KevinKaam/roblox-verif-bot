@@ -139,19 +139,17 @@ client.on('interactionCreate', async interaction => {
                 return interaction.editReply('⚠️ Todavía no se ha registrado ningún grupo en este servidor usando `/addgroup`.');
             }
 
-            // Consultar con cabecera anti-caché para forzar datos frescos de Roblox
             const groupsRes = await axios.get(`https://groups.roblox.com/v1/users/${userId}/groups/roles`, {
                 headers: { 
                     'User-Agent': 'Mozilla/5.0',
-                    'Cache-Control': 'no-cache',
-                    'Pragma': 'no-cache'
+                    'Cache-Control': 'no-cache'
                 }
             });
             const userGroups = groupsRes.data.data;
 
             const embed = new EmbedBuilder()
                 .setColor(0x5865F2)
-                .setTitle(`📊 Reporte de Verificación`)
+                .setTitle(`📊 Reporte de Verificación de Antigüedad`)
                 .setThumbnail(avatarUrl)
                 .setDescription(`**Perfil:** [${displayName} (@${username})](https://www.roblox.com/users/${userId}/profile)\n**ID:** \`${userId}\``)
                 .setTimestamp();
@@ -176,8 +174,8 @@ client.on('interactionCreate', async interaction => {
 
                 if (esOwner) {
                     embed.addFields({
-                        name: `<:Roblox:1441222073363202078> ${nombreGrupo}`,
-                        value: `• **Link:** [Click para ir al grupo](${linkGrupo})\n• **Estado:** <:Verificado:1441221673540911196> **Propietario del grupo (Apto para comprar en este grupo)**`,
+                        name: `👑 [${nombreGrupo}](${linkGrupo})`,
+                        value: `• **Estado:** ✅ **Apto para comprar en este grupo (Propietario)**`,
                         inline: false
                     });
                 } else if (pertenencia && pertenencia.joined) {
@@ -186,8 +184,8 @@ client.on('interactionCreate', async interaction => {
                     
                     if (isNaN(fechaUnido.getTime())) {
                         embed.addFields({
-                            name: `<:Roblox:1441222073363202078> ${nombreGrupo}`,
-                            value: `• **Link:** [Click para ir al grupo](${linkGrupo})\n• ⚠️ *No se pudo calcular la fecha exacta de unión.*`,
+                            name: `🧱 [${nombreGrupo}](${linkGrupo})`,
+                            value: `• ⚠️ *No se pudo calcular la fecha exacta de unión.*`,
                             inline: false
                         });
                         continue;
@@ -198,8 +196,8 @@ client.on('interactionCreate', async interaction => {
 
                     if (cumple) {
                         embed.addFields({
-                            name: `<:Roblox:1441222073363202078> ${nombreGrupo}`,
-                            value: `• **Link:** [Click para ir al grupo](${linkGrupo})\n• **Antigüedad:** \`${dias} días\`\n• **Estado:** <:Verificado:1441221673540911196> **Apto para comprar en este grupo**`,
+                            name: `🧱 [${nombreGrupo}](${linkGrupo})`,
+                            value: `• **Antigüedad:** \`${dias} días\`\n• **Estado:** ✅ **Apto para comprar en este grupo**`,
                             inline: false
                         });
                     } else {
@@ -208,15 +206,15 @@ client.on('interactionCreate', async interaction => {
                         const timestampUnix = Math.floor(fechaMeta.getTime() / 1000);
 
                         embed.addFields({
-                            name: `<:Roblox:1441222073363202078> ${nombreGrupo}`,
-                            value: `• **Link:** [Click para ir al grupo](${linkGrupo})\n• **Antigüedad actual:** \`${dias} días\`\n• **Faltan:** \`${diasFaltantes} días\` (Disponible <t:${timestampUnix}:R>)`,
+                            name: `🧱 [${nombreGrupo}](${linkGrupo})`,
+                            value: `• **Antigüedad actual:** \`${dias} días\`\n• **Faltan:** \`${diasFaltantes} días\` (Disponible <t:${timestampUnix}:R>)`,
                             inline: false
                         });
                     }
                 } else {
                     embed.addFields({
-                        name: `<:Roblox:1441222073363202078> ${nombreGrupo}`,
-                        value: `• **Link:** [Click para ir al grupo](${linkGrupo})\n• ❌ *El usuario no se encuentra unido a este grupo.*`,
+                        name: `🧱 [${nombreGrupo}](${linkGrupo})`,
+                        value: `• ❌ *El usuario no se encuentra unido a este grupo (o Roblox está actualizando la lista).*`,
                         inline: false
                     });
                 }
