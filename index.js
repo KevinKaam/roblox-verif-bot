@@ -38,7 +38,7 @@ const DATABASE_FILE = path.join(
 );
 
 // ============================================================
-// CLIENTE DISCORD
+// DISCORD CLIENT
 // ============================================================
 
 const client = new Client({
@@ -48,7 +48,7 @@ const client = new Client({
 });
 
 // ============================================================
-// SERVIDOR WEB PARA RENDER
+// EXPRESS - RENDER
 // ============================================================
 
 const app = express();
@@ -62,9 +62,11 @@ app.get("/", (req, res) => {
 app.get("/health", (req, res) => {
     res.json({
         online: true,
+        discordReady: client.isReady(),
         bot: client.user
             ? client.user.tag
             : null,
+        guilds: client.guilds.cache.size,
         time: new Date().toISOString()
     });
 });
@@ -80,7 +82,7 @@ app.listen(
 );
 
 // ============================================================
-// COMPROBAR VARIABLES
+// LOGS Y ERRORES
 // ============================================================
 
 console.log(
@@ -113,13 +115,47 @@ if (!ENCRYPTION_SECRET) {
     );
 }
 
+client.on(
+    "error",
+    error => {
+        console.error(
+            "❌ ERROR CLIENTE DISCORD:",
+            error
+        );
+    }
+);
+
+process.on(
+    "unhandledRejection",
+    error => {
+        console.error(
+            "❌ PROMESA NO CONTROLADA:",
+            error
+        );
+    }
+);
+
+process.on(
+    "uncaughtException",
+    error => {
+        console.error(
+            "❌ ERROR NO CONTROLADO:",
+            error
+        );
+    }
+);
+
 // ============================================================
 // BASE DE DATOS
 // ============================================================
 
 function cargarDB() {
 
-    if (!fs.existsSync(DATABASE_FILE)) {
+    if (
+        !fs.existsSync(
+            DATABASE_FILE
+        )
+    ) {
 
         fs.writeFileSync(
             DATABASE_FILE,
@@ -130,17 +166,24 @@ function cargarDB() {
 
     try {
 
-        return JSON.parse(
+        const contenido =
             fs.readFileSync(
                 DATABASE_FILE,
                 "utf8"
-            )
+            ).trim();
+
+        if (!contenido) {
+            return {};
+        }
+
+        return JSON.parse(
+            contenido
         );
 
     } catch (error) {
 
         console.error(
-            "❌ Error leyendo la base de datos:",
+            "❌ Error leyendo grupos_servidores.json:",
             error
         );
 
@@ -162,17 +205,21 @@ function guardarDB(data) {
             "utf8"
         );
 
+        return true;
+
     } catch (error) {
 
         console.error(
-            "❌ Error guardando la base de datos:",
+            "❌ Error guardando grupos_servidores.json:",
             error
         );
+
+        return false;
     }
 }
 
 // ============================================================
-// CIFRADO
+// CIFRADO API KEY
 // ============================================================
 
 function getEncryptionKey() {
@@ -185,8 +232,12 @@ function getEncryptionKey() {
     }
 
     return crypto
-        .createHash("sha256")
-        .update(ENCRYPTION_SECRET)
+        .createHash(
+            "sha256"
+        )
+        .update(
+            ENCRYPTION_SECRET
+        )
         .digest();
 }
 
@@ -196,7 +247,9 @@ function cifrar(texto) {
         getEncryptionKey();
 
     const iv =
-        crypto.randomBytes(16);
+        crypto.randomBytes(
+            16
+        );
 
     const cipher =
         crypto.createCipheriv(
@@ -226,11 +279,23 @@ function cifrar(texto) {
 
 function descifrar(texto) {
 
+    if (
+        typeof texto !==
+        "string"
+    ) {
+
+        throw new Error(
+            "INVALID_ENCRYPTED_KEY"
+        );
+    }
+
     const key =
         getEncryptionKey();
 
     const partes =
-        texto.split(":");
+        texto.split(
+            ":"
+        );
 
     if (
         partes.length !== 2
@@ -273,7 +338,9 @@ function descifrar(texto) {
 // OWNER
 // ============================================================
 
-function esOwner(interaction) {
+function esOwner(
+    interaction
+) {
 
     return (
         interaction.user.id ===
@@ -282,7 +349,7 @@ function esOwner(interaction) {
 }
 
 // ============================================================
-// GROUP ID
+// UTILIDADES
 // ============================================================
 
 function extraerGroupId(input) {
@@ -295,7 +362,9 @@ function extraerGroupId(input) {
         input.trim();
 
     if (
-        /^\d+$/.test(texto)
+        /^\d+$/.test(
+            texto
+        )
     ) {
 
         return texto;
@@ -311,662 +380,77 @@ function extraerGroupId(input) {
     }
 
     const numero =
-        texto.match(/\d+/);
+        texto.match(
+            /\d+/
+        );
 
     return numero
         ? numero[0]
         : null;
 }
 
-// ============================================================
-// ROBLOX USER ID
-// ============================================================
-
-async function obtenerUserId(input) {
-
-    const texto =
-        input.trim();
-
-    if (
-        /^\d+$/.test(texto)
-    ) {
-
-        return texto;
-    }
-
-    const urlMatch =
-        texto.match(
-            /roblox\.com\/users\/(\d+)/i
-        );
-
-    if (urlMatch) {
-        return urlMatch[1];
-    }
-
-    try {
-
-        const response =
-            await axios.post(
-                "https://users.roblox.com/v1/usernames/users",
-                {
-                    usernames: [
-                        texto
-                    ],
-                    excludeBannedUsers: true
-                },
-                {
-                    timeout: 10000
-                }
-            );
-
-        const usuarios =
-            response.data?.data || [];
-
-        if (
-            usuarios.length === 0
-        ) {
-
-            return null;
-        }
-
-        return usuarios[0].id.toString();
-
-    } catch (error) {
-
-        console.error(
-            "❌ Error buscando usuario:",
-            error.response?.status ||
-            error.message
-        );
-
-        return null;
-    }
-}
-
-// ============================================================
-// ROBLOX OPEN CLOUD - GRUPO
-// ============================================================
-
-async function obtenerGrupo(
-    groupId,
-    apiKey
+function formatearRobux(
+    numero
 ) {
 
-    try {
-
-        const response =
-            await axios.get(
-                `https://apis.roblox.com/cloud/v2/groups/${groupId}`,
-                {
-                    headers: {
-                        "x-api-key":
-                            apiKey,
-                        "Accept":
-                            "application/json"
-                    },
-                    timeout: 15000
-                }
-            );
-
-        return response.data;
-
-    } catch (error) {
-
-        const status =
-            error.response?.status;
-
-        console.error(
-            `❌ Error obteniendo grupo ${groupId}:`,
-            status,
-            error.response?.data ||
-            error.message
-        );
-
-        if (status === 401) {
-            throw new Error(
-                "API_KEY_INVALID"
-            );
-        }
-
-        if (status === 403) {
-            throw new Error(
-                "API_KEY_FORBIDDEN"
-            );
-        }
-
-        if (status === 404) {
-            throw new Error(
-                "GROUP_NOT_FOUND"
-            );
-        }
-
-        if (status === 429) {
-            throw new Error(
-                "ROBLOX_RATE_LIMIT"
-            );
-        }
-
-        throw error;
-    }
-}
-
-// ============================================================
-// ROBLOX OPEN CLOUD - MEMBERSHIP
-// ============================================================
-
-async function obtenerMembresia(
-    groupId,
-    userId,
-    apiKey
-) {
-
-    try {
-
-        const response =
-            await axios.get(
-                `https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships`,
-                {
-                    params: {
-                        maxPageSize: 10,
-                        filter:
-                            `user == 'users/${userId}'`
-                    },
-
-                    headers: {
-                        "x-api-key":
-                            apiKey,
-                        "Accept":
-                            "application/json"
-                    },
-
-                    timeout: 15000
-                }
-            );
-
-        const memberships =
-            response.data?.groupMemberships ||
-            [];
-
-        if (
-            memberships.length === 0
-        ) {
-
-            return null;
-        }
-
-        return memberships[0];
-
-    } catch (error) {
-
-        const status =
-            error.response?.status;
-
-        console.error(
-            `❌ Error membership ${groupId}/${userId}:`,
-            status
-        );
-
-        if (status === 401) {
-            throw new Error(
-                "API_KEY_INVALID"
-            );
-        }
-
-        if (status === 403) {
-            throw new Error(
-                "API_KEY_FORBIDDEN"
-            );
-        }
-
-        if (status === 404) {
-            throw new Error(
-                "GROUP_NOT_FOUND"
-            );
-        }
-
-        if (status === 429) {
-            throw new Error(
-                "ROBLOX_RATE_LIMIT"
-            );
-        }
-
-        throw error;
-    }
-}
-
-// ============================================================
-// CALCULAR DÍAS
-// ============================================================
-
-function calcularDias(createTime) {
-
-    if (!createTime) {
-        return null;
-    }
-
-    const fecha =
-        new Date(createTime);
-
-    if (
-        Number.isNaN(
-            fecha.getTime()
-        )
-    ) {
-
-        return null;
-    }
-
-    return Math.max(
-        0,
-        Math.floor(
-            (
-                Date.now() -
-                fecha.getTime()
-            ) /
-            86400000
-        )
+    return Number(
+        numero || 0
+    ).toLocaleString(
+        "en-US"
     );
 }
 
-// ============================================================
-// RESULTADO DE GRUPO
-// ============================================================
-
-function crearResultado(
-    grupo,
-    config,
-    membership
+function formatearUSD(
+    numero
 ) {
 
-    const groupId =
-        grupo.id?.toString() ||
-        config.groupId;
-
-    const nombre =
-        grupo.displayName ||
-        grupo.name ||
-        config.name ||
-        `Grupo ${groupId}`;
-
-    const link =
-        `https://www.roblox.com/groups/${groupId}`;
-
-    const requerido =
-        config.dias;
-
-    if (!membership) {
-
-        return {
-
-            groupId,
-            nombre,
-            link,
-
-            unido: false,
-
-            dias: null,
-
-            requerido,
-
-            elegible: false,
-
-            icono: "🔴",
-
-            texto:
-                "sin unirse"
-        };
-    }
-
-    const dias =
-        calcularDias(
-            membership.createTime
-        );
-
-    if (
-        dias === null
-    ) {
-
-        return {
-
-            groupId,
-            nombre,
-            link,
-
-            unido: true,
-
-            dias: null,
-
-            requerido,
-
-            elegible: false,
-
-            icono: "🟡",
-
-            texto:
-                "miembro — antigüedad no disponible"
-        };
-    }
-
-    if (
-        dias >= requerido
-    ) {
-
-        return {
-
-            groupId,
-            nombre,
-            link,
-
-            unido: true,
-
-            dias,
-
-            requerido,
-
-            elegible: true,
-
-            icono: "🟢",
-
-            texto:
-                `elegible — ${dias}d en el grupo`
-        };
-    }
-
-    const faltan =
-        requerido - dias;
-
-    return {
-
-        groupId,
-        nombre,
-        link,
-
-        unido: true,
-
-        dias,
-
-        requerido,
-
-        elegible: false,
-
-        icono: "🟡",
-
-        texto:
-            `miembro — ${dias}d en el grupo • faltan ${faltan}d`
-    };
+    return Number(
+        numero || 0
+    ).toFixed(
+        2
+    );
 }
 
-// ============================================================
-// EMBED DE VERIFICACIÓN
-// ============================================================
-
-function crearEmbed(
-    userId,
-    resultados
+function calcularPrecio(
+    cantidad,
+    precio1k
 ) {
 
-    const total =
-        resultados.length;
+    return (
+        Number(cantidad) /
+        1000
+    ) *
+    Number(precio1k);
+}
 
-    const elegibles =
-        resultados.filter(
-            r => r.elegible
-        ).length;
+function crearReferencia() {
 
-    const unidos =
-        resultados.filter(
-            r => r.unido
-        ).length;
+    const caracteres =
+        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
 
-    const restantes =
-        total -
-        elegibles;
-
-    let titulo;
-    let color;
-
-    if (
-        elegibles === total
-    ) {
-
-        titulo =
-            "🟢 Verificación completa";
-
-        color =
-            0x57F287;
-
-    } else if (
-        unidos > 0
-    ) {
-
-        titulo =
-            "⚠️ Verificación parcial";
-
-        color =
-            0xFEE75C;
-
-    } else {
-
-        titulo =
-            "🔴 Verificación fallida";
-
-        color =
-            0xED4245;
-    }
-
-    let lista = "";
+    let codigo =
+        "";
 
     for (
-        const resultado
-        of resultados
+        let i = 0;
+        i < 7;
+        i++
     ) {
 
-        lista +=
-            `${resultado.icono} **${resultado.nombre}** — ${resultado.texto}\n`;
+        codigo +=
+            caracteres[
+                Math.floor(
+                    Math.random() *
+                    caracteres.length
+                )
+            ];
     }
 
-    return new EmbedBuilder()
-
-        .setColor(color)
-
-        .setTitle(titulo)
-
-        .setDescription(
-            `🆔 **ID:** \`${userId}\`\n` +
-            `🔗 [Ver perfil de Roblox](https://www.roblox.com/users/${userId}/profile)`
-        )
-
-        .addFields({
-
-            name:
-                "📋 Resultado",
-
-            value:
-                `🟢 **${elegibles}** elegible(s) • ` +
-                `🔴 **${restantes}** restante(s)`
-        })
-
-        .addFields({
-
-            name:
-                "🏢 Grupos",
-
-            value:
-                lista ||
-                "No hay grupos configurados."
-        })
-
-        .setFooter({
-
-            text:
-                "KaamStore BOT • Roblox Open Cloud"
-        })
-
-        .setTimestamp();
+    return `KSG-${codigo}`;
 }
 
 // ============================================================
-// BOTONES
-// ============================================================
-
-function crearBotones(
-    resultados
-) {
-
-    const filas = [];
-
-    let fila =
-        new ActionRowBuilder();
-
-    let cantidad = 0;
-
-    for (
-        const resultado
-        of resultados
-    ) {
-
-        if (
-            cantidad >= 5
-        ) {
-
-            filas.push(
-                fila
-            );
-
-            fila =
-                new ActionRowBuilder();
-
-            cantidad = 0;
-        }
-
-        fila.addComponents(
-
-            new ButtonBuilder()
-
-                .setLabel(
-                    resultado.nombre.length > 70
-                        ? resultado.nombre.substring(
-                            0,
-                            67
-                        ) + "..."
-                        : resultado.nombre
-                )
-
-                .setURL(
-                    resultado.link
-                )
-
-                .setStyle(
-                    ButtonStyle.Link
-                )
-        );
-
-        cantidad++;
-    }
-
-    if (
-        cantidad > 0
-    ) {
-
-        filas.push(
-            fila
-        );
-    }
-
-    return filas;
-}
-
-// ============================================================
-// TUTORIAL
-// ============================================================
-
-function crearTutorial() {
-
-    return new EmbedBuilder()
-
-        .setColor(
-            0x5865F2
-        )
-
-        .setTitle(
-            "🔑 Tutorial — KaamStore BOT"
-        )
-
-        .setDescription(
-            "Configura una API Key de Roblox Open Cloud para que el bot pueda verificar grupos."
-        )
-
-        .addFields(
-
-            {
-                name:
-                    "1️⃣ Creator Dashboard",
-
-                value:
-                    "[Abrir API Keys de Roblox](https://create.roblox.com/dashboard/credentials)"
-            },
-
-            {
-                name:
-                    "2️⃣ Crear API Key",
-
-                value:
-                    "Pulsa **Create API Key**."
-            },
-
-            {
-                name:
-                    "3️⃣ Seleccionar Group",
-
-                value:
-                    "Configura los permisos relacionados con el grupo."
-            },
-
-            {
-                name:
-                    "4️⃣ Permisos",
-
-                value:
-                    "El bot necesita permisos de lectura para consultar la información."
-            },
-
-            {
-                name:
-                    "5️⃣ Añadir grupo",
-
-                value:
-                    "`/addgroup group_id:123456 api_key:TU_KEY dias:3 verificado:si`"
-            },
-
-            {
-                name:
-                    "⭐ Requisitos",
-
-                value:
-                    "🟢 Verificado → **3 días**\n" +
-                    "🔴 No verificado → **15 días**"
-            },
-
-            {
-                name:
-                    "⚠️ Seguridad",
-
-                value:
-                    "Nunca publiques tu API Key."
-            }
-        )
-
-        .setFooter({
-
-            text:
-                "KaamStore BOT"
-        })
-
-        .setTimestamp();
-}
-
-// ============================================================
-// CONFIG KAAMSTORE
+// CONFIGURACIÓN KAAMSTORE
 // ============================================================
 
 function obtenerConfigKaamStore(
@@ -975,7 +459,10 @@ function obtenerConfigKaamStore(
 ) {
 
     if (
-        !db[guildId]
+        !db[guildId] ||
+        Array.isArray(
+            db[guildId]
+        )
     ) {
 
         db[guildId] = {};
@@ -1014,24 +501,63 @@ function obtenerConfigKaamStore(
             precio1k:
                 DEFAULT_1K_BASE,
 
-            usuarios: {}
+            usuarios:
+                {}
         };
     }
 
     const config =
         db[guildId].kaamstore;
 
-    if (!config.roles) {
-        config.roles = {};
+    if (
+        !config.roles
+    ) {
+
+        config.roles =
+            {};
     }
 
-    if (!config.usuarios) {
-        config.usuarios = {};
+    if (
+        !config.usuarios
+    ) {
+
+        config.usuarios =
+            {};
+    }
+
+    const roles =
+        [
+            "role1k",
+            "role10k",
+            "role100k",
+            "role500k",
+            "role1m"
+        ];
+
+    for (
+        const roleName
+        of roles
+    ) {
+
+        if (
+            !Object.prototype.hasOwnProperty.call(
+                config.roles,
+                roleName
+            )
+        ) {
+
+            config.roles[
+                roleName
+            ] = null;
+        }
     }
 
     if (
         typeof config.precio1k !==
-        "number"
+        "number" ||
+        Number.isNaN(
+            config.precio1k
+        )
     ) {
 
         config.precio1k =
@@ -1042,68 +568,746 @@ function obtenerConfigKaamStore(
 }
 
 // ============================================================
-// FORMATOS
+// ROBLOX - USER ID
 // ============================================================
 
-function formatearRobux(numero) {
+async function obtenerUserId(
+    input
+) {
 
-    return Number(
-        numero || 0
-    ).toLocaleString(
-        "en-US"
+    const texto =
+        input.trim();
+
+    if (
+        /^\d+$/.test(
+            texto
+        )
+    ) {
+
+        return texto;
+    }
+
+    const urlMatch =
+        texto.match(
+            /roblox\.com\/users\/(\d+)/i
+        );
+
+    if (urlMatch) {
+
+        return urlMatch[1];
+    }
+
+    try {
+
+        const response =
+            await axios.post(
+                "https://users.roblox.com/v1/usernames/users",
+                {
+                    usernames: [
+                        texto
+                    ],
+
+                    excludeBannedUsers:
+                        true
+                },
+                {
+                    timeout:
+                        15000
+                }
+            );
+
+        const usuarios =
+            response.data?.data ||
+            [];
+
+        if (
+            usuarios.length === 0
+        ) {
+
+            return null;
+        }
+
+        return usuarios[0]
+            .id
+            .toString();
+
+    } catch (error) {
+
+        console.error(
+            "❌ Error buscando usuario Roblox:",
+            error.response?.status ||
+            error.message
+        );
+
+        return null;
+    }
+}
+
+// ============================================================
+// ROBLOX - ERRORES
+// ============================================================
+
+function traducirErrorRoblox(
+    error
+) {
+
+    const status =
+        error.response?.status;
+
+    if (
+        status === 401
+    ) {
+
+        return "API_KEY_INVALID";
+    }
+
+    if (
+        status === 403
+    ) {
+
+        return "API_KEY_FORBIDDEN";
+    }
+
+    if (
+        status === 404
+    ) {
+
+        return "GROUP_NOT_FOUND";
+    }
+
+    if (
+        status === 429
+    ) {
+
+        return "ROBLOX_RATE_LIMIT";
+    }
+
+    return null;
+}
+
+// ============================================================
+// ROBLOX - OBTENER GRUPO
+// ============================================================
+
+async function obtenerGrupo(
+    groupId,
+    apiKey
+) {
+
+    try {
+
+        const response =
+            await axios.get(
+                `https://apis.roblox.com/cloud/v2/groups/${groupId}`,
+                {
+
+                    headers: {
+
+                        "x-api-key":
+                            apiKey,
+
+                        "Accept":
+                            "application/json"
+                    },
+
+                    timeout:
+                        15000
+                }
+            );
+
+        return response.data;
+
+    } catch (error) {
+
+        console.error(
+            `❌ ERROR GRUPO ${groupId}:`,
+            error.response?.status ||
+            error.message
+        );
+
+        const codigo =
+            traducirErrorRoblox(
+                error
+            );
+
+        if (codigo) {
+
+            throw new Error(
+                codigo
+            );
+        }
+
+        throw error;
+    }
+}
+
+// ============================================================
+// ROBLOX - MEMBRESÍA
+// ============================================================
+
+async function obtenerMembresia(
+    groupId,
+    userId,
+    apiKey
+) {
+
+    try {
+
+        const response =
+            await axios.get(
+                `https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships`,
+                {
+
+                    params: {
+
+                        maxPageSize:
+                            10,
+
+                        filter:
+                            `user == 'users/${userId}'`
+                    },
+
+                    headers: {
+
+                        "x-api-key":
+                            apiKey,
+
+                        "Accept":
+                            "application/json"
+                    },
+
+                    timeout:
+                        15000
+                }
+            );
+
+        const memberships =
+            response.data?.groupMemberships ||
+            response.data?.data ||
+            [];
+
+        if (
+            memberships.length === 0
+        ) {
+
+            return null;
+        }
+
+        return memberships[0];
+
+    } catch (error) {
+
+        const status =
+            error.response?.status;
+
+        console.error(
+            `❌ ERROR MEMBERSHIP ${groupId}/${userId}:`,
+            status ||
+            error.message
+        );
+
+        // Si Roblox responde que no existe
+        // la membresía, lo tratamos como no unido.
+        if (
+            status === 404
+        ) {
+
+            return null;
+        }
+
+        const codigo =
+            traducirErrorRoblox(
+                error
+            );
+
+        if (codigo) {
+
+            throw new Error(
+                codigo
+            );
+        }
+
+        throw error;
+    }
+}
+
+// ============================================================
+// CALCULAR DÍAS
+// ============================================================
+
+function calcularDias(
+    createTime
+) {
+
+    if (!createTime) {
+
+        return null;
+    }
+
+    const fecha =
+        new Date(
+            createTime
+        );
+
+    if (
+        Number.isNaN(
+            fecha.getTime()
+        )
+    ) {
+
+        return null;
+    }
+
+    return Math.max(
+        0,
+        Math.floor(
+            (
+                Date.now() -
+                fecha.getTime()
+            ) /
+            86400000
+        )
     );
 }
 
-function formatearUSD(numero) {
-
-    return Number(
-        numero || 0
-    ).toFixed(2);
-}
-
 // ============================================================
-// CALCULAR PRECIO
+// RESULTADO VERIFICACIÓN
 // ============================================================
 
-function calcularPrecio(
-    cantidad,
-    precio1k
+function crearResultado(
+    grupo,
+    config,
+    membership
 ) {
 
-    return (
-        Number(cantidad) /
-        1000
-    ) *
-    Number(precio1k);
+    const groupId =
+        grupo?.id?.toString() ||
+        config.groupId;
+
+    const nombre =
+        grupo?.displayName ||
+        grupo?.name ||
+        config.name ||
+        `Grupo ${groupId}`;
+
+    const link =
+        `https://www.roblox.com/groups/${groupId}`;
+
+    const requerido =
+        Number(
+            config.dias || 15
+        );
+
+    if (!membership) {
+
+        return {
+
+            groupId,
+            nombre,
+            link,
+
+            unido:
+                false,
+
+            dias:
+                null,
+
+            requerido,
+
+            elegible:
+                false,
+
+            icono:
+                "🔴",
+
+            texto:
+                "sin unirse"
+        };
+    }
+
+    const createTime =
+        membership.createTime ||
+        membership.createdAt ||
+        membership.joined;
+
+    const dias =
+        calcularDias(
+            createTime
+        );
+
+    if (
+        dias === null
+    ) {
+
+        return {
+
+            groupId,
+            nombre,
+            link,
+
+            unido:
+                true,
+
+            dias:
+                null,
+
+            requerido,
+
+            elegible:
+                false,
+
+            icono:
+                "🟡",
+
+            texto:
+                "miembro — antigüedad no disponible"
+        };
+    }
+
+    if (
+        dias >= requerido
+    ) {
+
+        return {
+
+            groupId,
+            nombre,
+            link,
+
+            unido:
+                true,
+
+            dias,
+
+            requerido,
+
+            elegible:
+                true,
+
+            icono:
+                "🟢",
+
+            texto:
+                `elegible — ${dias}d en el grupo`
+        };
+    }
+
+    const faltan =
+        requerido -
+        dias;
+
+    return {
+
+        groupId,
+        nombre,
+        link,
+
+        unido:
+            true,
+
+        dias,
+
+        requerido,
+
+        elegible:
+            false,
+
+        icono:
+            "🟡",
+
+        texto:
+            `miembro — ${dias}d en el grupo • faltan ${faltan}d`
+    };
 }
 
 // ============================================================
-// REFERENCIA
+// EMBED VERIFICACIÓN
 // ============================================================
 
-function crearReferencia() {
+function crearEmbed(
+    userId,
+    resultados
+) {
 
-    const caracteres =
-        "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+    const total =
+        resultados.length;
 
-    let codigo = "";
+    const elegibles =
+        resultados.filter(
+            r =>
+                r.elegible
+        ).length;
 
-    for (
-        let i = 0;
-        i < 7;
-        i++
+    const unidos =
+        resultados.filter(
+            r =>
+                r.unido
+        ).length;
+
+    const restantes =
+        total -
+        elegibles;
+
+    let titulo =
+        "🔴 Verificación fallida";
+
+    let color =
+        0xED4245;
+
+    if (
+        elegibles === total &&
+        total > 0
     ) {
 
-        codigo +=
-            caracteres[
-                Math.floor(
-                    Math.random() *
-                    caracteres.length
-                )
-            ];
+        titulo =
+            "🟢 Verificación completa";
+
+        color =
+            0x57F287;
+
+    } else if (
+        unidos > 0
+    ) {
+
+        titulo =
+            "⚠️ Verificación parcial";
+
+        color =
+            0xFEE75C;
     }
 
-    return `KSG-${codigo}`;
+    let lista =
+        "";
+
+    for (
+        const resultado
+        of resultados
+    ) {
+
+        lista +=
+            `${resultado.icono} **${resultado.nombre}** — ${resultado.texto}\n`;
+    }
+
+    return new EmbedBuilder()
+
+        .setColor(
+            color
+        )
+
+        .setTitle(
+            titulo
+        )
+
+        .setDescription(
+            `🆔 **ID:** \`${userId}\`\n` +
+            `🔗 [Ver perfil de Roblox](https://www.roblox.com/users/${userId}/profile)`
+        )
+
+        .addFields(
+
+            {
+
+                name:
+                    "📋 Resultado",
+
+                value:
+                    `🟢 **${elegibles}** elegible(s) • ` +
+                    `🔴 **${restantes}** restante(s)`
+            },
+
+            {
+
+                name:
+                    "🏢 Grupos",
+
+                value:
+                    lista ||
+                    "No hay grupos configurados."
+            }
+        )
+
+        .setFooter({
+
+            text:
+                "KaamStore BOT • Roblox Open Cloud"
+        })
+
+        .setTimestamp();
+}
+
+// ============================================================
+// BOTONES
+// ============================================================
+
+function crearBotones(
+    resultados
+) {
+
+    const filas =
+        [];
+
+    let fila =
+        new ActionRowBuilder();
+
+    let cantidad =
+        0;
+
+    for (
+        const resultado
+        of resultados
+    ) {
+
+        if (
+            cantidad >= 5
+        ) {
+
+            filas.push(
+                fila
+            );
+
+            fila =
+                new ActionRowBuilder();
+
+            cantidad =
+                0;
+        }
+
+        const nombre =
+            resultado.nombre.length > 70
+                ? resultado.nombre.slice(
+                    0,
+                    67
+                ) + "..."
+                : resultado.nombre;
+
+        fila.addComponents(
+
+            new ButtonBuilder()
+
+                .setLabel(
+                    nombre
+                )
+
+                .setURL(
+                    resultado.link
+                )
+
+                .setStyle(
+                    ButtonStyle.Link
+                )
+        );
+
+        cantidad++;
+    }
+
+    if (
+        cantidad > 0
+    ) {
+
+        filas.push(
+            fila
+        );
+    }
+
+    return filas.slice(
+        0,
+        5
+    );
+}
+
+// ============================================================
+// TUTORIAL
+// ============================================================
+
+function crearTutorial() {
+
+    return new EmbedBuilder()
+
+        .setColor(
+            0x5865F2
+        )
+
+        .setTitle(
+            "🔑 Tutorial — KaamStore BOT"
+        )
+
+        .setDescription(
+            "Configura una API Key de Roblox Open Cloud para verificar usuarios y consultar la antigüedad dentro de tus grupos."
+        )
+
+        .addFields(
+
+            {
+
+                name:
+                    "1️⃣ Abrir Creator Dashboard",
+
+                value:
+                    "[Abrir API Keys de Roblox](https://create.roblox.com/dashboard/credentials)"
+            },
+
+            {
+
+                name:
+                    "2️⃣ Crear una API Key",
+
+                value:
+                    "Pulsa **Create API Key** y ponle un nombre."
+            },
+
+            {
+
+                name:
+                    "3️⃣ Añadir el grupo",
+
+                value:
+                    "Selecciona el sistema **Group** y el grupo que quieres conectar."
+            },
+
+            {
+
+                name:
+                    "4️⃣ Permisos",
+
+                value:
+                    "Configura los permisos necesarios de **lectura (Read)**."
+            },
+
+            {
+
+                name:
+                    "5️⃣ Configurar el bot",
+
+                value:
+                    "`/addgroup group_id:123456 api_key:TU_KEY dias:3 verificado:si`"
+            },
+
+            {
+
+                name:
+                    "⭐ Días",
+
+                value:
+                    "🟢 Verificado → **3 días**\n🔴 No verificado → **15 días**"
+            },
+
+            {
+
+                name:
+                    "⚠️ Seguridad",
+
+                value:
+                    "Nunca compartas tu API Key. KaamStore BOT la guarda cifrada."
+            }
+        )
+
+        .setFooter({
+
+            text:
+                "KaamStore BOT"
+        })
+
+        .setTimestamp();
 }
 
 // ============================================================
@@ -1244,30 +1448,40 @@ async function actualizarRoles(
                 robux
             );
 
-        const rolesConfigurados = [
+        const rolesConfigurados =
+            [
 
-            config.roles.role1k,
+                config.roles.role1k,
 
-            config.roles.role10k,
+                config.roles.role10k,
 
-            config.roles.role100k,
+                config.roles.role100k,
 
-            config.roles.role500k,
+                config.roles.role500k,
 
-            config.roles.role1m
+                config.roles.role1m
 
-        ].filter(Boolean);
+            ].filter(
+                Boolean
+            );
 
-        // Quitar todos los rangos anteriores
+        // Quitar rangos anteriores
         for (
             const roleId
             of rolesConfigurados
         ) {
 
+            const esRangoActual =
+                rango.clave &&
+                config.roles[
+                    rango.clave
+                ] === roleId;
+
             if (
                 miembro.roles.cache.has(
                     roleId
-                )
+                ) &&
+                !esRangoActual
             ) {
 
                 try {
@@ -1279,14 +1493,14 @@ async function actualizarRoles(
                 } catch (error) {
 
                     console.error(
-                        `❌ No pude quitar el rol ${roleId}:`,
+                        `❌ Error quitando rol ${roleId}:`,
                         error.message
                     );
                 }
             }
         }
 
-        // Añadir el rango correspondiente
+        // Añadir rango actual
         if (
             rango.clave
         ) {
@@ -1297,32 +1511,32 @@ async function actualizarRoles(
                 ];
 
             if (
-                roleId
+                roleId &&
+                !miembro.roles.cache.has(
+                    roleId
+                )
             ) {
-
-                const role =
-                    guild.roles.cache.get(
-                        roleId
-                    );
-
-                if (!role) {
-
-                    console.log(
-                        `⚠️ No existe el rol ${roleId}.`
-                    );
-
-                    return;
-                }
 
                 try {
 
-                    await miembro.roles.add(
-                        role
-                    );
+                    const role =
+                        guild.roles.cache.get(
+                            roleId
+                        ) ||
+                        await guild.roles.fetch(
+                            roleId
+                        );
 
-                    console.log(
-                        `🏆 ${role.name} añadido a ${miembro.user.tag}`
-                    );
+                    if (role) {
+
+                        await miembro.roles.add(
+                            role
+                        );
+
+                        console.log(
+                            `🏆 Rol añadido: ${role.name} -> ${miembro.user.tag}`
+                        );
+                    }
 
                 } catch (error) {
 
@@ -1337,7 +1551,7 @@ async function actualizarRoles(
     } catch (error) {
 
         console.error(
-            "❌ Error actualizando roles:",
+            "❌ ERROR ACTUALIZANDO ROLES:",
             error
         );
     }
@@ -1365,125 +1579,137 @@ async function enviarAutovouch(
         return;
     }
 
-    const canal =
-        guild.channels.cache.get(
-            config.canalAutovouch
-        );
-
-    if (!canal) {
-
-        console.log(
-            "⚠️ Canal de autovouch no encontrado."
-        );
-
-        return;
-    }
-
-    const rango =
-        obtenerRango(
-            compra.robuxTotales
-        );
-
-    const embed =
-        new EmbedBuilder()
-
-            .setColor(
-                0xFF4D5A
-            )
-
-            .setTitle(
-                "🛍️ ¡Nueva compra registrada!"
-            )
-
-            .setThumbnail(
-                usuario.displayAvatarURL({
-                    dynamic: true,
-                    size: 256
-                })
-            )
-
-            .setDescription(
-                `**${usuario.username}** ha realizado una compra en **KaamStore**.`
-            )
-
-            .addFields(
-
-                {
-                    name:
-                        "👤 Cliente",
-
-                    value:
-                        `${usuario}`,
-
-                    inline:
-                        true
-                },
-
-                {
-                    name:
-                        "🧾 Referencia",
-
-                    value:
-                        `\`${compra.referencia}\``,
-
-                    inline:
-                        true
-                },
-
-                {
-                    name:
-                        "🛒 Compra",
-
-                    value:
-                        `${ROBUX_EMOJI} **${formatearRobux(compra.cantidad)} Robux**`,
-
-                    inline:
-                        true
-                },
-
-                {
-                    name:
-                        "💵 Precio",
-
-                    value:
-                        `**$${formatearUSD(compra.precio)} USD**`,
-
-                    inline:
-                        true
-                },
-
-                {
-                    name:
-                        `${ROBUX_EMOJI} Total comprado`,
-
-                    value:
-                        `**${formatearRobux(compra.robuxTotales)} Robux**`,
-
-                    inline:
-                        true
-                },
-
-                {
-                    name:
-                        "🏆 Rango",
-
-                    value:
-                        `**${rango.nombre}**`,
-
-                    inline:
-                        true
-                }
-            )
-
-            .setFooter({
-
-                text:
-                    "KaamStore • Autovouch"
-            })
-
-            .setTimestamp();
-
     try {
+
+        const canal =
+            guild.channels.cache.get(
+                config.canalAutovouch
+            ) ||
+            await guild.channels.fetch(
+                config.canalAutovouch
+            );
+
+        if (
+            !canal ||
+            !canal.isTextBased()
+        ) {
+
+            console.log(
+                "⚠️ Canal de autovouch no encontrado."
+            );
+
+            return;
+        }
+
+        const rango =
+            obtenerRango(
+                compra.robuxTotales
+            );
+
+        const embed =
+            new EmbedBuilder()
+
+                .setColor(
+                    0xFF4D5A
+                )
+
+                .setTitle(
+                    "🛍️ ¡Nueva compra registrada!"
+                )
+
+                .setThumbnail(
+                    usuario.displayAvatarURL({
+                        size:
+                            256
+                    })
+                )
+
+                .setDescription(
+                    `**${usuario.username}** ha realizado una compra en **KaamStore**.`
+                )
+
+                .addFields(
+
+                    {
+
+                        name:
+                            "👤 Cliente",
+
+                        value:
+                            `${usuario}`,
+
+                        inline:
+                            true
+                    },
+
+                    {
+
+                        name:
+                            "🧾 Referencia",
+
+                        value:
+                            `\`${compra.referencia}\``,
+
+                        inline:
+                            true
+                    },
+
+                    {
+
+                        name:
+                            "🛒 Compra",
+
+                        value:
+                            `${ROBUX_EMOJI} **${formatearRobux(compra.cantidad)} Robux**`,
+
+                        inline:
+                            true
+                    },
+
+                    {
+
+                        name:
+                            "💵 Precio",
+
+                        value:
+                            `**$${formatearUSD(compra.precio)} USD**`,
+
+                        inline:
+                            true
+                    },
+
+                    {
+
+                        name:
+                            `${ROBUX_EMOJI} Total comprado`,
+
+                        value:
+                            `**${formatearRobux(compra.robuxTotales)} Robux**`,
+
+                        inline:
+                            true
+                    },
+
+                    {
+
+                        name:
+                            "🏆 Rango",
+
+                        value:
+                            `**${rango.nombre}**`,
+
+                        inline:
+                            true
+                    }
+                )
+
+                .setFooter({
+
+                    text:
+                        "KaamStore • Autovouch"
+                })
+
+                .setTimestamp();
 
         await canal.send({
 
@@ -1493,13 +1719,13 @@ async function enviarAutovouch(
         });
 
         console.log(
-            `🧾 Autovouch enviado para ${usuario.tag}`
+            `🧾 Autovouch enviado: ${usuario.tag}`
         );
 
     } catch (error) {
 
         console.error(
-            "❌ Error enviando autovouch:",
+            "❌ ERROR AUTOVOUCH:",
             error
         );
     }
@@ -1542,25 +1768,26 @@ function crearPerfilEmbed(
         )
 
         .setTitle(
-            `🛍️ Perfil de ${usuario.username}`
+            "🛒 Estadísticas de KaamStore"
         )
 
         .setThumbnail(
             usuario.displayAvatarURL({
-                dynamic: true,
-                size: 256
+                size:
+                    256
             })
         )
 
         .setDescription(
-            `Estadísticas públicas de compras en **KaamStore**.`
+            `${usuario}\n\nEstadísticas públicas de compras en **KaamStore**.`
         )
 
         .addFields(
 
             {
+
                 name:
-                    "🏆 Rango",
+                    "🏆 Rango actual",
 
                 value:
                     `**${rango.nombre}**`,
@@ -1570,6 +1797,7 @@ function crearPerfilEmbed(
             },
 
             {
+
                 name:
                     `${ROBUX_EMOJI} Robux totales`,
 
@@ -1581,8 +1809,9 @@ function crearPerfilEmbed(
             },
 
             {
+
                 name:
-                    "🛍️ Compras",
+                    "🛍️ Compras totales",
 
                 value:
                     `**${compras}**`,
@@ -1592,6 +1821,7 @@ function crearPerfilEmbed(
             },
 
             {
+
                 name:
                     "💵 Dinero gastado",
 
@@ -1603,22 +1833,12 @@ function crearPerfilEmbed(
             },
 
             {
+
                 name:
                     "💰 Precio actual",
 
                 value:
-                    `${ROBUX_EMOJI} 1K = **$${formatearUSD(precioBase)} USD**`,
-
-                inline:
-                    true
-            },
-
-            {
-                name:
-                    "🆔 Discord",
-
-                value:
-                    `\`${usuario.id}\``,
+                    `1K = **$${formatearUSD(precioBase)} USD**`,
 
                 inline:
                     true
@@ -1634,10 +1854,6 @@ function crearPerfilEmbed(
         .setTimestamp();
 }
 
-// ============================================================
-// PERFIL SIN COMPRAS
-// ============================================================
-
 function crearSinComprasEmbed(
     usuario
 ) {
@@ -1649,19 +1865,18 @@ function crearSinComprasEmbed(
         )
 
         .setTitle(
-            `🛍️ Perfil de ${usuario.username}`
+            "🛒 Perfil KaamStore"
         )
 
         .setThumbnail(
             usuario.displayAvatarURL({
-                dynamic: true,
-                size: 256
+                size:
+                    256
             })
         )
 
         .setDescription(
-            `${usuario}\n\n` +
-            "⚠️ **No tiene ninguna compra registrada en KaamStore.**"
+            `${usuario}\n\n⚠️ **No tiene ninguna compra registrada en KaamStore.**`
         )
 
         .setFooter({
@@ -1674,426 +1889,423 @@ function crearSinComprasEmbed(
 }
 
 // ============================================================
-// REGISTRO DE COMANDOS
+// COMANDOS
 // ============================================================
 
-client.once(
-    "ready",
-    async () => {
+function crearComandos() {
 
-        console.log(
-            `✅ Conectado como ${client.user.tag}`
+    return [
+
+        new SlashCommandBuilder()
+
+            .setName(
+                "user"
+            )
+
+            .setDescription(
+                "Verifica un usuario de Roblox"
+            )
+
+            .addStringOption(
+                option =>
+                    option
+
+                        .setName(
+                            "usuario"
+                        )
+
+                        .setDescription(
+                            "Username, ID o URL de Roblox"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            ),
+
+        new SlashCommandBuilder()
+
+            .setName(
+                "addgroup"
+            )
+
+            .setDescription(
+                "Añade un grupo de Roblox"
+            )
+
+            .addStringOption(
+                option =>
+                    option
+
+                        .setName(
+                            "group_id"
+                        )
+
+                        .setDescription(
+                            "ID o URL del grupo"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addStringOption(
+                option =>
+                    option
+
+                        .setName(
+                            "api_key"
+                        )
+
+                        .setDescription(
+                            "API Key de Roblox"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addIntegerOption(
+                option =>
+                    option
+
+                        .setName(
+                            "dias"
+                        )
+
+                        .setDescription(
+                            "3 o 15 días"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+
+                        .addChoices(
+
+                            {
+
+                                name:
+                                    "3 días",
+
+                                value:
+                                    3
+                            },
+
+                            {
+
+                                name:
+                                    "15 días",
+
+                                value:
+                                    15
+                            }
+                        )
+            )
+
+            .addStringOption(
+                option =>
+                    option
+
+                        .setName(
+                            "verificado"
+                        )
+
+                        .setDescription(
+                            "¿El grupo está verificado?"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+
+                        .addChoices(
+
+                            {
+
+                                name:
+                                    "Sí",
+
+                                value:
+                                    "si"
+                            },
+
+                            {
+
+                                name:
+                                    "No",
+
+                                value:
+                                    "no"
+                            }
+                        )
+            ),
+
+        new SlashCommandBuilder()
+
+            .setName(
+                "tutorial"
+            )
+
+            .setDescription(
+                "Tutorial para configurar Roblox"
+            ),
+
+        new SlashCommandBuilder()
+
+            .setName(
+                "perfil"
+            )
+
+            .setDescription(
+                "Muestra tu perfil público de KaamStore"
+            ),
+
+        new SlashCommandBuilder()
+
+            .setName(
+                "addcompra"
+            )
+
+            .setDescription(
+                "Registra una compra de Robux"
+            )
+
+            .addUserOption(
+                option =>
+                    option
+
+                        .setName(
+                            "usuario"
+                        )
+
+                        .setDescription(
+                            "Cliente"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addIntegerOption(
+                option =>
+                    option
+
+                        .setName(
+                            "cantidad"
+                        )
+
+                        .setDescription(
+                            "Cantidad de Robux"
+                        )
+
+                        .setMinValue(
+                            1
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            ),
+
+        new SlashCommandBuilder()
+
+            .setName(
+                "config"
+            )
+
+            .setDescription(
+                "Configura KaamStore"
+            )
+
+            .addChannelOption(
+                option =>
+                    option
+
+                        .setName(
+                            "canal-autovouch"
+                        )
+
+                        .setDescription(
+                            "Canal de autovouch"
+                        )
+
+                        .addChannelTypes(
+                            ChannelType.GuildText
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addChannelOption(
+                option =>
+                    option
+
+                        .setName(
+                            "canal-comandos"
+                        )
+
+                        .setDescription(
+                            "Canal donde se usa /perfil"
+                        )
+
+                        .addChannelTypes(
+                            ChannelType.GuildText
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addRoleOption(
+                option =>
+                    option
+
+                        .setName(
+                            "rol-1k"
+                        )
+
+                        .setDescription(
+                            "Rol al llegar a 1K"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addRoleOption(
+                option =>
+                    option
+
+                        .setName(
+                            "rol-10k"
+                        )
+
+                        .setDescription(
+                            "Rol al llegar a 10K"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addRoleOption(
+                option =>
+                    option
+
+                        .setName(
+                            "rol-100k"
+                        )
+
+                        .setDescription(
+                            "Rol al llegar a 100K"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addRoleOption(
+                option =>
+                    option
+
+                        .setName(
+                            "rol-500k"
+                        )
+
+                        .setDescription(
+                            "Rol al llegar a 500K"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+            .addRoleOption(
+                option =>
+                    option
+
+                        .setName(
+                            "rol-1m"
+                        )
+
+                        .setDescription(
+                            "Rol al llegar a 1M"
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            ),
+
+        new SlashCommandBuilder()
+
+            .setName(
+                "1kbase"
+            )
+
+            .setDescription(
+                "Cambia el precio de 1K Robux"
+            )
+
+            .addNumberOption(
+                option =>
+                    option
+
+                        .setName(
+                            "base"
+                        )
+
+                        .setDescription(
+                            "Ejemplo: 7.50"
+                        )
+
+                        .setMinValue(
+                            0.01
+                        )
+
+                        .setRequired(
+                            true
+                        )
+            )
+
+    ].map(
+        command =>
+            command.toJSON()
+    );
+}
+
+// ============================================================
+// REGISTRAR COMANDOS POR SERVIDOR
+// ============================================================
+
+async function registrarComandosEnServidor(
+    guild
+) {
+
+    if (
+        !TOKEN ||
+        !CLIENT_ID
+    ) {
+
+        console.error(
+            "❌ No puedo registrar comandos: faltan variables."
         );
 
-        const commands = [
+        return;
+    }
 
-            // ------------------------------------------------
-            // USER
-            // ------------------------------------------------
-
-            new SlashCommandBuilder()
-
-                .setName(
-                    "user"
-                )
-
-                .setDescription(
-                    "Verifica un usuario de Roblox"
-                )
-
-                .addStringOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "usuario"
-                            )
-
-                            .setDescription(
-                                "Username, ID o URL"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                ),
-
-            // ------------------------------------------------
-            // ADDGROUP
-            // ------------------------------------------------
-
-            new SlashCommandBuilder()
-
-                .setName(
-                    "addgroup"
-                )
-
-                .setDescription(
-                    "Añade un grupo de Roblox"
-                )
-
-                .addStringOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "group_id"
-                            )
-
-                            .setDescription(
-                                "ID o URL del grupo"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addStringOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "api_key"
-                            )
-
-                            .setDescription(
-                                "API Key de Roblox"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addIntegerOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "dias"
-                            )
-
-                            .setDescription(
-                                "3 o 15 días"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-
-                            .addChoices(
-
-                                {
-                                    name:
-                                        "3 días",
-                                    value:
-                                        3
-                                },
-
-                                {
-                                    name:
-                                        "15 días",
-                                    value:
-                                        15
-                                }
-                            )
-                )
-
-                .addStringOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "verificado"
-                            )
-
-                            .setDescription(
-                                "¿Está verificado?"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-
-                            .addChoices(
-
-                                {
-                                    name:
-                                        "Sí",
-                                    value:
-                                        "si"
-                                },
-
-                                {
-                                    name:
-                                        "No",
-                                    value:
-                                        "no"
-                                }
-                            )
-                ),
-
-            // ------------------------------------------------
-            // TUTORIAL
-            // ------------------------------------------------
-
-            new SlashCommandBuilder()
-
-                .setName(
-                    "tutorial"
-                )
-
-                .setDescription(
-                    "Tutorial para configurar Roblox"
-                ),
-
-            // ------------------------------------------------
-            // PERFIL
-            // ------------------------------------------------
-
-            new SlashCommandBuilder()
-
-                .setName(
-                    "perfil"
-                )
-
-                .setDescription(
-                    "Muestra tu perfil público de KaamStore"
-                ),
-
-            // ------------------------------------------------
-            // ADDCOMPRA
-            // ------------------------------------------------
-
-            new SlashCommandBuilder()
-
-                .setName(
-                    "addcompra"
-                )
-
-                .setDescription(
-                    "Registra una compra de Robux"
-                )
-
-                .addUserOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "usuario"
-                            )
-
-                            .setDescription(
-                                "Cliente"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addIntegerOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "cantidad"
-                            )
-
-                            .setDescription(
-                                "Cantidad de Robux"
-                            )
-
-                            .setMinValue(
-                                1
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                ),
-
-            // ------------------------------------------------
-            // CONFIG
-            // ------------------------------------------------
-
-            new SlashCommandBuilder()
-
-                .setName(
-                    "config"
-                )
-
-                .setDescription(
-                    "Configura KaamStore"
-                )
-
-                .addChannelOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "canal-autovouch"
-                            )
-
-                            .setDescription(
-                                "Canal de autovouch"
-                            )
-
-                            .addChannelTypes(
-                                ChannelType.GuildText
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addChannelOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "canal-comandos"
-                            )
-
-                            .setDescription(
-                                "Canal donde se usa /perfil"
-                            )
-
-                            .addChannelTypes(
-                                ChannelType.GuildText
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addRoleOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "rol-1k"
-                            )
-
-                            .setDescription(
-                                "Rol al llegar a 1K"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addRoleOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "rol-10k"
-                            )
-
-                            .setDescription(
-                                "Rol al llegar a 10K"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addRoleOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "rol-100k"
-                            )
-
-                            .setDescription(
-                                "Rol al llegar a 100K"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addRoleOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "rol-500k"
-                            )
-
-                            .setDescription(
-                                "Rol al llegar a 500K"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addRoleOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "rol-1m"
-                            )
-
-                            .setDescription(
-                                "Rol al llegar a 1M"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                ),
-
-            // ------------------------------------------------
-            // 1KBASE
-            // ------------------------------------------------
-
-            new SlashCommandBuilder()
-
-                .setName(
-                    "1kbase"
-                )
-
-                .setDescription(
-                    "Cambia el precio de 1K Robux"
-                )
-
-                .addNumberOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "base"
-                            )
-
-                            .setDescription(
-                                "Ejemplo: 7.50"
-                            )
-
-                            .setMinValue(
-                                0.01
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-        ].map(
-            command =>
-                command.toJSON()
-        );
+    try {
 
         const rest =
             new REST({
@@ -2103,37 +2315,142 @@ client.once(
                 TOKEN
             );
 
-        try {
+        await rest.put(
 
-            // ================================================
-            // REGISTRAR GLOBALMENTE
-            // ================================================
+            Routes.applicationGuildCommands(
+                CLIENT_ID,
+                guild.id
+            ),
 
-            await rest.put(
+            {
 
-                Routes.applicationCommands(
-                    CLIENT_ID
-                ),
+                body:
+                    crearComandos()
+            }
+        );
 
-                {
-                    body:
-                        commands
-                }
-            );
+        console.log(
+            `✅ Comandos registrados en ${guild.name} (${guild.id})`
+        );
 
-            console.log(
-                "✅ Comandos globales registrados."
-            );
+    } catch (error) {
 
-        } catch (error) {
+        console.error(
+            `❌ Error registrando comandos en ${guild.name}:`,
+            error
+        );
+    }
+}
 
-            console.error(
-                "❌ Error registrando comandos:",
-                error
+// ============================================================
+// READY
+// ============================================================
+
+client.once(
+    "ready",
+    async () => {
+
+        console.log(
+            "========================================"
+        );
+
+        console.log(
+            `🟢 DISCORD CONECTADO COMO: ${client.user.tag}`
+        );
+
+        console.log(
+            `🟢 SERVIDORES: ${client.guilds.cache.size}`
+        );
+
+        console.log(
+            "========================================"
+        );
+
+        for (
+            const guild
+            of client.guilds.cache.values()
+        ) {
+
+            await registrarComandosEnServidor(
+                guild
             );
         }
     }
 );
+
+// ============================================================
+// NUEVO SERVIDOR
+// ============================================================
+
+client.on(
+    "guildCreate",
+    async guild => {
+
+        console.log(
+            `🟢 Bot añadido a: ${guild.name}`
+        );
+
+        await registrarComandosEnServidor(
+            guild
+        );
+    }
+);
+
+// ============================================================
+// RESPONDER ERROR
+// ============================================================
+
+async function responderError(
+    interaction,
+    error
+) {
+
+    console.error(
+        `❌ ERROR EN /${interaction.commandName}:`,
+        error
+    );
+
+    const mensaje =
+        "❌ Ocurrió un error procesando este comando. Revisa los Logs de Render.";
+
+    try {
+
+        if (
+            interaction.deferred ||
+            interaction.replied
+        ) {
+
+            await interaction.editReply({
+                content:
+                    mensaje,
+
+                embeds:
+                    [],
+
+                components:
+                    []
+            });
+
+        } else {
+
+            await interaction.reply({
+
+                content:
+                    mensaje,
+
+                ephemeral:
+                    true
+            });
+        }
+
+    } catch (replyError) {
+
+        console.error(
+            "❌ ERROR RESPONDIENDO EL ERROR:",
+            replyError
+        );
+    }
+}
 
 // ============================================================
 // INTERACCIONES
@@ -2150,191 +2467,768 @@ client.on(
             return;
         }
 
-        // ====================================================
-        // TUTORIAL
-        // ====================================================
+        console.log(
+            `📥 COMANDO RECIBIDO: /${interaction.commandName} | Usuario: ${interaction.user.tag} (${interaction.user.id}) | Servidor: ${interaction.guild?.name || "DM"}`
+        );
 
-        if (
-            interaction.commandName ===
-            "tutorial"
-        ) {
+        try {
 
             if (
-                !esOwner(interaction)
+                !interaction.inGuild()
             ) {
 
-                return interaction.reply({
+                await interaction.reply({
 
                     content:
-                        "❌ Solo el Owner puede utilizar este comando.",
+                        "❌ Este comando solo puede utilizarse dentro de un servidor.",
 
                     ephemeral:
                         true
                 });
+
+                return;
             }
 
-            return interaction.reply({
-
-                embeds: [
-                    crearTutorial()
-                ],
-
-                ephemeral:
-                    true
-            });
-        }
-
-        // ====================================================
-        // ADDGROUP
-        // ====================================================
-
-        if (
-            interaction.commandName ===
-            "addgroup"
-        ) {
+            // ====================================================
+            // PERFIL
+            // ====================================================
 
             if (
-                !esOwner(interaction)
+                interaction.commandName ===
+                "perfil"
             ) {
 
-                return interaction.reply({
-
-                    content:
-                        "❌ Solo el Owner puede utilizar este comando.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            const groupInput =
-                interaction.options.getString(
-                    "group_id"
-                );
-
-            const apiKey =
-                interaction.options.getString(
-                    "api_key"
-                );
-
-            const dias =
-                interaction.options.getInteger(
-                    "dias"
-                );
-
-            const verificado =
-                interaction.options.getString(
-                    "verificado"
-                );
-
-            const groupId =
-                extraerGroupId(
-                    groupInput
-                );
-
-            if (!groupId) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ No pude reconocer el Group ID.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            if (
-                verificado === "si" &&
-                dias !== 3
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Un grupo verificado debe tener **3 días**.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            if (
-                verificado === "no" &&
-                dias !== 15
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Un grupo no verificado debe tener **15 días**.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            await interaction.deferReply({
-                ephemeral:
-                    true
-            });
-
-            try {
-
-                const grupo =
-                    await obtenerGrupo(
-                        groupId,
-                        apiKey
-                    );
-
-                const nombre =
-                    grupo.displayName ||
-                    grupo.name ||
-                    `Grupo ${groupId}`;
+                // RESPUESTA INMEDIATA
+                await interaction.deferReply();
 
                 const db =
                     cargarDB();
 
-                const guildId =
-                    interaction.guild.id;
+                const config =
+                    obtenerConfigKaamStore(
+                        db,
+                        interaction.guild.id
+                    );
 
+                // Solo permitir el comando en el canal configurado
                 if (
-                    !db[guildId]
+                    config.canalComandos &&
+                    interaction.channelId !==
+                    config.canalComandos
                 ) {
 
-                    db[guildId] = {};
+                    const canal =
+                        interaction.guild.channels.cache.get(
+                            config.canalComandos
+                        );
+
+                    await interaction.editReply({
+
+                        content:
+                            canal
+                                ? `❌ El comando \`/perfil\` solamente puede utilizarse en ${canal}.`
+                                : "❌ Este comando solamente puede utilizarse en el canal configurado."
+                    });
+
+                    return;
                 }
 
-                db[guildId][groupId] = {
+                const datos =
+                    config.usuarios[
+                        interaction.user.id
+                    ];
 
-                    groupId,
+                if (
+                    !datos ||
+                    Number(
+                        datos.robuxTotales || 0
+                    ) <= 0
+                ) {
 
-                    name:
-                        nombre,
+                    await interaction.editReply({
 
-                    apiKey:
-                        cifrar(
+                        embeds: [
+
+                            crearSinComprasEmbed(
+                                interaction.user
+                            )
+
+                        ]
+                    });
+
+                    return;
+                }
+
+                await interaction.editReply({
+
+                    embeds: [
+
+                        crearPerfilEmbed(
+
+                            interaction.user,
+
+                            datos,
+
+                            config.precio1k
+                        )
+
+                    ]
+                });
+
+                return;
+            }
+
+            // ====================================================
+            // COMANDOS OWNER
+            // ====================================================
+
+            const comandosOwner =
+                [
+
+                    "tutorial",
+
+                    "addgroup",
+
+                    "user",
+
+                    "config",
+
+                    "1kbase",
+
+                    "addcompra"
+
+                ];
+
+            if (
+                comandosOwner.includes(
+                    interaction.commandName
+                ) &&
+                !esOwner(
+                    interaction
+                )
+            ) {
+
+                await interaction.reply({
+
+                    content:
+                        "❌ Solo el Owner puede utilizar este comando.",
+
+                    ephemeral:
+                        true
+                });
+
+                return;
+            }
+
+            // ====================================================
+            // TUTORIAL
+            // ====================================================
+
+            if (
+                interaction.commandName ===
+                "tutorial"
+            ) {
+
+                await interaction.reply({
+
+                    embeds: [
+                        crearTutorial()
+                    ],
+
+                    ephemeral:
+                        true
+                });
+
+                return;
+            }
+
+            // ====================================================
+            // ADDGROUP
+            // ====================================================
+
+            if (
+                interaction.commandName ===
+                "addgroup"
+            ) {
+
+                // RESPONDER INMEDIATAMENTE
+                await interaction.deferReply({
+
+                    ephemeral:
+                        true
+                });
+
+                const groupInput =
+                    interaction.options.getString(
+                        "group_id"
+                    );
+
+                const apiKey =
+                    interaction.options.getString(
+                        "api_key"
+                    );
+
+                const dias =
+                    interaction.options.getInteger(
+                        "dias"
+                    );
+
+                const verificado =
+                    interaction.options.getString(
+                        "verificado"
+                    );
+
+                const groupId =
+                    extraerGroupId(
+                        groupInput
+                    );
+
+                if (!groupId) {
+
+                    await interaction.editReply(
+                        "❌ No pude reconocer el Group ID."
+                    );
+
+                    return;
+                }
+
+                if (
+                    verificado === "si" &&
+                    dias !== 3
+                ) {
+
+                    await interaction.editReply(
+                        "❌ Un grupo verificado debe tener exactamente **3 días**."
+                    );
+
+                    return;
+                }
+
+                if (
+                    verificado === "no" &&
+                    dias !== 15
+                ) {
+
+                    await interaction.editReply(
+                        "❌ Un grupo no verificado debe tener exactamente **15 días**."
+                    );
+
+                    return;
+                }
+
+                try {
+
+                    const grupo =
+                        await obtenerGrupo(
+                            groupId,
                             apiKey
-                        ),
+                        );
 
-                    dias,
+                    const nombre =
+                        grupo.displayName ||
+                        grupo.name ||
+                        `Grupo ${groupId}`;
 
-                    verificado:
-                        verificado === "si",
+                    const db =
+                        cargarDB();
 
-                    addedBy:
-                        interaction.user.id,
+                    if (
+                        !db[
+                            interaction.guild.id
+                        ] ||
+                        Array.isArray(
+                            db[
+                                interaction.guild.id
+                            ]
+                        )
+                    ) {
 
-                    addedAt:
-                        new Date()
-                            .toISOString()
-                };
+                        db[
+                            interaction.guild.id
+                        ] = {};
+                    }
+
+                    // MANTENER MISMA ESTRUCTURA
+                    db[
+                        interaction.guild.id
+                    ][
+                        groupId
+                    ] = {
+
+                        groupId,
+
+                        name:
+                            nombre,
+
+                        apiKey:
+                            cifrar(
+                                apiKey
+                            ),
+
+                        dias,
+
+                        verificado:
+                            verificado ===
+                            "si",
+
+                        addedBy:
+                            interaction.user.id,
+
+                        addedAt:
+                            new Date()
+                                .toISOString()
+                    };
+
+                    guardarDB(
+                        db
+                    );
+
+                    await interaction.editReply({
+
+                        embeds: [
+
+                            new EmbedBuilder()
+
+                                .setColor(
+                                    0x57F287
+                                )
+
+                                .setTitle(
+                                    "✅ Grupo configurado"
+                                )
+
+                                .setDescription(
+                                    `**${nombre}** fue añadido correctamente.`
+                                )
+
+                                .addFields(
+
+                                    {
+
+                                        name:
+                                            "🆔 Group ID",
+
+                                        value:
+                                            `\`${groupId}\``,
+
+                                        inline:
+                                            true
+                                    },
+
+                                    {
+
+                                        name:
+                                            "⭐ Verificado",
+
+                                        value:
+                                            verificado === "si"
+                                                ? "🟢 Sí"
+                                                : "🔴 No",
+
+                                        inline:
+                                            true
+                                    },
+
+                                    {
+
+                                        name:
+                                            "📅 Días requeridos",
+
+                                        value:
+                                            `**${dias} días**`,
+
+                                        inline:
+                                            true
+                                    }
+                                )
+
+                                .setFooter({
+
+                                    text:
+                                        "KaamStore BOT"
+                                })
+
+                                .setTimestamp()
+
+                        ]
+                    });
+
+                    return;
+
+                } catch (error) {
+
+                    console.error(
+                        "❌ ERROR ADDGROUP:",
+                        error
+                    );
+
+                    let mensaje =
+                        "❌ Ocurrió un error conectando con Roblox.";
+
+                    if (
+                        error.message ===
+                        "API_KEY_INVALID"
+                    ) {
+
+                        mensaje =
+                            "❌ API Key inválida.";
+
+                    } else if (
+                        error.message ===
+                        "API_KEY_FORBIDDEN"
+                    ) {
+
+                        mensaje =
+                            "❌ La API Key no tiene acceso a ese grupo.";
+
+                    } else if (
+                        error.message ===
+                        "GROUP_NOT_FOUND"
+                    ) {
+
+                        mensaje =
+                            "❌ Grupo no encontrado.";
+
+                    } else if (
+                        error.message ===
+                        "ROBLOX_RATE_LIMIT"
+                    ) {
+
+                        mensaje =
+                            "⏳ Roblox está limitando temporalmente las peticiones.";
+
+                    } else if (
+                        error.message ===
+                        "ENCRYPTION_SECRET_MISSING"
+                    ) {
+
+                        mensaje =
+                            "❌ Falta ENCRYPTION_SECRET en Render.";
+                    }
+
+                    await interaction.editReply(
+                        mensaje
+                    );
+
+                    return;
+                }
+            }
+
+            // ====================================================
+            // USER
+            // ====================================================
+
+            if (
+                interaction.commandName ===
+                "user"
+            ) {
+
+                // RESPONDER INMEDIATAMENTE
+                await interaction.deferReply();
+
+                try {
+
+                    const input =
+                        interaction.options.getString(
+                            "usuario"
+                        );
+
+                    const userId =
+                        await obtenerUserId(
+                            input
+                        );
+
+                    if (!userId) {
+
+                        await interaction.editReply(
+                            "❌ No encontré ese usuario de Roblox."
+                        );
+
+                        return;
+                    }
+
+                    const db =
+                        cargarDB();
+
+                    const grupos =
+                        db[
+                            interaction.guild.id
+                        ] || {};
+
+                    const groupIds =
+                        Object.keys(
+                            grupos
+                        )
+
+                            .filter(
+                                id =>
+                                    id !==
+                                    "kaamstore"
+                            )
+
+                            .filter(
+                                id =>
+                                    grupos[id] &&
+                                    typeof grupos[id] ===
+                                    "object" &&
+                                    grupos[id].apiKey
+                            );
+
+                    if (
+                        groupIds.length === 0
+                    ) {
+
+                        await interaction.editReply(
+                            "⚠️ No hay grupos configurados. Usa `/addgroup`."
+                        );
+
+                        return;
+                    }
+
+                    const resultados =
+                        [];
+
+                    for (
+                        const groupId
+                        of groupIds
+                    ) {
+
+                        const config =
+                            grupos[
+                                groupId
+                            ];
+
+                        try {
+
+                            const apiKey =
+                                descifrar(
+                                    config.apiKey
+                                );
+
+                            const grupo =
+                                await obtenerGrupo(
+                                    groupId,
+                                    apiKey
+                                );
+
+                            const membership =
+                                await obtenerMembresia(
+                                    groupId,
+                                    userId,
+                                    apiKey
+                                );
+
+                            resultados.push(
+
+                                crearResultado(
+
+                                    grupo,
+
+                                    config,
+
+                                    membership
+                                )
+                            );
+
+                        } catch (error) {
+
+                            console.error(
+                                `❌ ERROR GRUPO ${groupId}:`,
+                                error
+                            );
+
+                            let texto =
+                                "error consultando Roblox";
+
+                            if (
+                                error.message ===
+                                "API_KEY_INVALID"
+                            ) {
+
+                                texto =
+                                    "API Key inválida";
+
+                            } else if (
+                                error.message ===
+                                "API_KEY_FORBIDDEN"
+                            ) {
+
+                                texto =
+                                    "API Key sin permiso";
+
+                            } else if (
+                                error.message ===
+                                "ROBLOX_RATE_LIMIT"
+                            ) {
+
+                                texto =
+                                    "límite temporal de Roblox";
+
+                            } else if (
+                                error.message ===
+                                "GROUP_NOT_FOUND"
+                            ) {
+
+                                texto =
+                                    "grupo no encontrado";
+                            }
+
+                            resultados.push({
+
+                                groupId,
+
+                                nombre:
+                                    config.name ||
+                                    `Grupo ${groupId}`,
+
+                                link:
+                                    `https://www.roblox.com/groups/${groupId}`,
+
+                                unido:
+                                    false,
+
+                                dias:
+                                    null,
+
+                                requerido:
+                                    config.dias ||
+                                    15,
+
+                                elegible:
+                                    false,
+
+                                icono:
+                                    "⚠️",
+
+                                texto
+                            });
+                        }
+                    }
+
+                    await interaction.editReply({
+
+                        embeds: [
+
+                            crearEmbed(
+
+                                userId,
+
+                                resultados
+                            )
+
+                        ],
+
+                        components:
+
+                            crearBotones(
+                                resultados
+                            )
+                    });
+
+                    return;
+
+                } catch (error) {
+
+                    console.error(
+                        "❌ ERROR USER:",
+                        error
+                    );
+
+                    await interaction.editReply(
+                        "❌ Ocurrió un error realizando la verificación."
+                    );
+
+                    return;
+                }
+            }
+
+            // ====================================================
+            // CONFIG
+            // ====================================================
+
+            if (
+                interaction.commandName ===
+                "config"
+            ) {
+
+                await interaction.deferReply({
+
+                    ephemeral:
+                        true
+                });
+
+                const canalAutovouch =
+                    interaction.options.getChannel(
+                        "canal-autovouch"
+                    );
+
+                const canalComandos =
+                    interaction.options.getChannel(
+                        "canal-comandos"
+                    );
+
+                const rol1k =
+                    interaction.options.getRole(
+                        "rol-1k"
+                    );
+
+                const rol10k =
+                    interaction.options.getRole(
+                        "rol-10k"
+                    );
+
+                const rol100k =
+                    interaction.options.getRole(
+                        "rol-100k"
+                    );
+
+                const rol500k =
+                    interaction.options.getRole(
+                        "rol-500k"
+                    );
+
+                const rol1m =
+                    interaction.options.getRole(
+                        "rol-1m"
+                    );
+
+                const db =
+                    cargarDB();
+
+                const config =
+                    obtenerConfigKaamStore(
+
+                        db,
+
+                        interaction.guild.id
+                    );
+
+                config.canalAutovouch =
+                    canalAutovouch.id;
+
+                config.canalComandos =
+                    canalComandos.id;
+
+                config.roles.role1k =
+                    rol1k.id;
+
+                config.roles.role10k =
+                    rol10k.id;
+
+                config.roles.role100k =
+                    rol100k.id;
+
+                config.roles.role500k =
+                    rol500k.id;
+
+                config.roles.role1m =
+                    rol1m.id;
 
                 guardarDB(
                     db
                 );
 
-                return interaction.editReply({
+                await interaction.editReply({
 
                     embeds: [
 
@@ -2345,48 +3239,106 @@ client.on(
                             )
 
                             .setTitle(
-                                "✅ Grupo configurado"
+                                "⚙️ KaamStore configurado"
                             )
 
                             .setDescription(
-                                `**${nombre}** fue añadido correctamente.`
+                                "La configuración fue guardada correctamente."
                             )
 
                             .addFields(
 
                                 {
+
                                     name:
-                                        "🆔 Group ID",
+                                        "🧾 Autovouch",
 
                                     value:
-                                        `\`${groupId}\``,
+                                        `${canalAutovouch}`,
 
                                     inline:
                                         true
                                 },
 
                                 {
+
                                     name:
-                                        "⭐ Verificado",
+                                        "💬 Canal de comandos",
 
                                     value:
-                                        verificado === "si"
-                                            ? "🟢 Sí"
-                                            : "🔴 No",
+                                        `${canalComandos}`,
 
                                     inline:
                                         true
                                 },
 
                                 {
+
                                     name:
-                                        "📅 Días",
+                                        `${ROBUX_EMOJI} 1K`,
 
                                     value:
-                                        `**${dias} días**`,
+                                        `${rol1k}`,
 
                                     inline:
                                         true
+                                },
+
+                                {
+
+                                    name:
+                                        `${ROBUX_EMOJI} 10K`,
+
+                                    value:
+                                        `${rol10k}`,
+
+                                    inline:
+                                        true
+                                },
+
+                                {
+
+                                    name:
+                                        `${ROBUX_EMOJI} 100K`,
+
+                                    value:
+                                        `${rol100k}`,
+
+                                    inline:
+                                        true
+                                },
+
+                                {
+
+                                    name:
+                                        `${ROBUX_EMOJI} 500K`,
+
+                                    value:
+                                        `${rol500k}`,
+
+                                    inline:
+                                        true
+                                },
+
+                                {
+
+                                    name:
+                                        `${ROBUX_EMOJI} 1M`,
+
+                                    value:
+                                        `${rol1m}`,
+
+                                    inline:
+                                        true
+                                },
+
+                                {
+
+                                    name:
+                                        "💰 Precio base",
+
+                                    value:
+                                        `1K = **$${formatearUSD(config.precio1k)} USD**`
                                 }
                             )
 
@@ -2397,973 +3349,59 @@ client.on(
                             })
 
                             .setTimestamp()
+
                     ]
                 });
 
-            } catch (error) {
-
-                console.error(
-                    "❌ ERROR ADDGROUP:",
-                    error
-                );
-
-                if (
-                    error.message ===
-                    "API_KEY_INVALID"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ API Key inválida."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "API_KEY_FORBIDDEN"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ La API Key no tiene acceso a ese grupo."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "GROUP_NOT_FOUND"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ Grupo no encontrado."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "ROBLOX_RATE_LIMIT"
-                ) {
-
-                    return interaction.editReply(
-                        "⏳ Roblox está limitando temporalmente las peticiones."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "ENCRYPTION_SECRET_MISSING"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ Falta ENCRYPTION_SECRET en Render."
-                    );
-                }
-
-                return interaction.editReply(
-                    "❌ Ocurrió un error conectando con Roblox."
-                );
+                return;
             }
-        }
 
-        // ====================================================
-        // USER
-        // ====================================================
-
-        if (
-            interaction.commandName ===
-            "user"
-        ) {
+            // ====================================================
+            // 1KBASE
+            // ====================================================
 
             if (
-                !esOwner(interaction)
+                interaction.commandName ===
+                "1kbase"
             ) {
 
-                return interaction.reply({
-
-                    content:
-                        "❌ Solo el Owner puede utilizar este comando.",
+                await interaction.deferReply({
 
                     ephemeral:
                         true
                 });
-            }
 
-            await interaction.deferReply();
-
-            const input =
-                interaction.options.getString(
-                    "usuario"
-                );
-
-            try {
-
-                const userId =
-                    await obtenerUserId(
-                        input
+                const nuevoPrecio =
+                    interaction.options.getNumber(
+                        "base"
                     );
-
-                if (!userId) {
-
-                    return interaction.editReply(
-                        "❌ No encontré ese usuario de Roblox."
-                    );
-                }
 
                 const db =
                     cargarDB();
-
-                const guildId =
-                    interaction.guild.id;
-
-                const grupos =
-                    db[guildId] || {};
-
-                const groupIds =
-                    Object.keys(
-                        grupos
-                    ).filter(
-                        id =>
-                            id !== "kaamstore"
-                    );
-
-                if (
-                    groupIds.length === 0
-                ) {
-
-                    return interaction.editReply(
-                        "⚠️ No hay grupos configurados. Usa `/addgroup`."
-                    );
-                }
-
-                const resultados = [];
-
-                for (
-                    const groupId
-                    of groupIds
-                ) {
-
-                    const config =
-                        grupos[groupId];
-
-                    let apiKey;
-
-                    try {
-
-                        apiKey =
-                            descifrar(
-                                config.apiKey
-                            );
-
-                    } catch {
-
-                        resultados.push({
-
-                            groupId,
-
-                            nombre:
-                                config.name ||
-                                `Grupo ${groupId}`,
-
-                            link:
-                                `https://www.roblox.com/groups/${groupId}`,
-
-                            unido:
-                                false,
-
-                            dias:
-                                null,
-
-                            requerido:
-                                config.dias,
-
-                            elegible:
-                                false,
-
-                            icono:
-                                "⚠️",
-
-                            texto:
-                                "API Key ilegible"
-                        });
-
-                        continue;
-                    }
-
-                    try {
-
-                        const grupo =
-                            await obtenerGrupo(
-                                groupId,
-                                apiKey
-                            );
-
-                        const membership =
-                            await obtenerMembresia(
-                                groupId,
-                                userId,
-                                apiKey
-                            );
-
-                        resultados.push(
-
-                            crearResultado(
-                                grupo,
-                                config,
-                                membership
-                            )
-                        );
-
-                    } catch (error) {
-
-                        let texto =
-                            "error consultando Roblox";
-
-                        if (
-                            error.message ===
-                            "API_KEY_INVALID"
-                        ) {
-
-                            texto =
-                                "API Key inválida";
-
-                        } else if (
-                            error.message ===
-                            "API_KEY_FORBIDDEN"
-                        ) {
-
-                            texto =
-                                "API Key sin permiso";
-
-                        } else if (
-                            error.message ===
-                            "ROBLOX_RATE_LIMIT"
-                        ) {
-
-                            texto =
-                                "límite de Roblox";
-
-                        } else if (
-                            error.message ===
-                            "GROUP_NOT_FOUND"
-                        ) {
-
-                            texto =
-                                "grupo no encontrado";
-                        }
-
-                        resultados.push({
-
-                            groupId,
-
-                            nombre:
-                                config.name ||
-                                `Grupo ${groupId}`,
-
-                            link:
-                                `https://www.roblox.com/groups/${groupId}`,
-
-                            unido:
-                                false,
-
-                            dias:
-                                null,
-
-                            requerido:
-                                config.dias,
-
-                            elegible:
-                                false,
-
-                            icono:
-                                "⚠️",
-
-                            texto
-                        });
-                    }
-                }
-
-                return interaction.editReply({
-
-                    embeds: [
-
-                        crearEmbed(
-                            userId,
-                            resultados
-                        )
-                    ],
-
-                    components:
-                        crearBotones(
-                            resultados
-                        )
-                });
-
-            } catch (error) {
-
-                console.error(
-                    "❌ ERROR USER:",
-                    error
-                );
-
-                return interaction.editReply(
-                    "❌ Ocurrió un error realizando la verificación."
-                );
-            }
-        }
-
-        // ====================================================
-        // CONFIG
-        // ====================================================
-
-        if (
-            interaction.commandName ===
-            "config"
-        ) {
-
-            if (
-                !esOwner(interaction)
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Solo el Owner puede utilizar este comando.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            const canalAutovouch =
-                interaction.options.getChannel(
-                    "canal-autovouch"
-                );
-
-            const canalComandos =
-                interaction.options.getChannel(
-                    "canal-comandos"
-                );
-
-            const rol1k =
-                interaction.options.getRole(
-                    "rol-1k"
-                );
-
-            const rol10k =
-                interaction.options.getRole(
-                    "rol-10k"
-                );
-
-            const rol100k =
-                interaction.options.getRole(
-                    "rol-100k"
-                );
-
-            const rol500k =
-                interaction.options.getRole(
-                    "rol-500k"
-                );
-
-            const rol1m =
-                interaction.options.getRole(
-                    "rol-1m"
-                );
-
-            const db =
-                cargarDB();
-
-            const guildId =
-                interaction.guild.id;
-
-            const config =
-                obtenerConfigKaamStore(
-                    db,
-                    guildId
-                );
-
-            config.canalAutovouch =
-                canalAutovouch.id;
-
-            config.canalComandos =
-                canalComandos.id;
-
-            config.roles.role1k =
-                rol1k.id;
-
-            config.roles.role10k =
-                rol10k.id;
-
-            config.roles.role100k =
-                rol100k.id;
-
-            config.roles.role500k =
-                rol500k.id;
-
-            config.roles.role1m =
-                rol1m.id;
-
-            guardarDB(
-                db
-            );
-
-            return interaction.reply({
-
-                embeds: [
-
-                    new EmbedBuilder()
-
-                        .setColor(
-                            0x57F287
-                        )
-
-                        .setTitle(
-                            "⚙️ KaamStore configurado"
-                        )
-
-                        .setDescription(
-                            "La configuración del sistema fue guardada correctamente."
-                        )
-
-                        .addFields(
-
-                            {
-                                name:
-                                    "🧾 Autovouch",
-
-                                value:
-                                    `${canalAutovouch}`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    "💬 Comandos",
-
-                                value:
-                                    `${canalComandos}`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    `${ROBUX_EMOJI} 1K`,
-
-                                value:
-                                    `${rol1k}`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    `${ROBUX_EMOJI} 10K`,
-
-                                value:
-                                    `${rol10k}`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    `${ROBUX_EMOJI} 100K`,
-
-                                value:
-                                    `${rol100k}`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    `${ROBUX_EMOJI} 500K`,
-
-                                value:
-                                    `${rol500k}`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    `${ROBUX_EMOJI} 1M`,
-
-                                value:
-                                    `${rol1m}`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    "💰 Precio base",
-
-                                value:
-                                    `1K = **$${formatearUSD(config.precio1k)} USD**`
-                            }
-                        )
-
-                        .setFooter({
-
-                            text:
-                                "KaamStore BOT"
-                        })
-
-                        .setTimestamp()
-                ],
-
-                ephemeral:
-                    true
-            });
-        }
-
-        // ====================================================
-        // 1KBASE
-        // ====================================================
-
-        if (
-            interaction.commandName ===
-            "1kbase"
-        ) {
-
-            if (
-                !esOwner(interaction)
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Solo el Owner puede utilizar este comando.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            const nuevoPrecio =
-                interaction.options.getNumber(
-                    "base"
-                );
-
-            const db =
-                cargarDB();
-
-            const guildId =
-                interaction.guild.id;
-
-            const config =
-                obtenerConfigKaamStore(
-                    db,
-                    guildId
-                );
-
-            const anterior =
-                config.precio1k;
-
-            config.precio1k =
-                Number(
-                    nuevoPrecio.toFixed(2)
-                );
-
-            guardarDB(
-                db
-            );
-
-            return interaction.reply({
-
-                embeds: [
-
-                    new EmbedBuilder()
-
-                        .setColor(
-                            0x57F287
-                        )
-
-                        .setTitle(
-                            "💰 Precio actualizado"
-                        )
-
-                        .setDescription(
-                            "El precio base de KaamStore ha sido cambiado correctamente."
-                        )
-
-                        .addFields(
-
-                            {
-                                name:
-                                    "Anterior",
-
-                                value:
-                                    `1K = **$${formatearUSD(anterior)} USD**`,
-
-                                inline:
-                                    true
-                            },
-
-                            {
-                                name:
-                                    "Nuevo",
-
-                                value:
-                                    `1K = **$${formatearUSD(config.precio1k)} USD**`,
-
-                                inline:
-                                    true
-                            }
-                        )
-
-                        .setFooter({
-
-                            text:
-                                "Las compras anteriores mantienen su precio original."
-                        })
-
-                        .setTimestamp()
-                ],
-
-                ephemeral:
-                    true
-            });
-        }
-
-        // ====================================================
-        // PERFIL
-        // ====================================================
-
-        if (
-            interaction.commandName ===
-            "perfil"
-        ) {
-
-            const db =
-                cargarDB();
-
-            const guildId =
-                interaction.guild.id;
-
-            const config =
-                obtenerConfigKaamStore(
-                    db,
-                    guildId
-                );
-
-            // -----------------------------------------------
-            // SOLO EN CANAL CONFIGURADO
-            // -----------------------------------------------
-
-            if (
-                config.canalComandos &&
-                interaction.channel.id !==
-                config.canalComandos
-            ) {
-
-                const canal =
-                    interaction.guild.channels.cache.get(
-                        config.canalComandos
-                    );
-
-                return interaction.reply({
-
-                    content:
-                        canal
-                            ? `❌ El comando \`/perfil\` solamente puede utilizarse en ${canal}.`
-                            : "❌ Este comando solamente puede utilizarse en el canal configurado.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            const userId =
-                interaction.user.id;
-
-            const datos =
-                config.usuarios[
-                    userId
-                ];
-
-            // -----------------------------------------------
-            // SIN COMPRAS
-            // -----------------------------------------------
-
-            if (
-                !datos ||
-                Number(
-                    datos.robuxTotales || 0
-                ) <= 0
-            ) {
-
-                // IMPORTANTE:
-                // NO ephemeral.
-                // El perfil será público.
-
-                return interaction.reply({
-
-                    embeds: [
-
-                        crearSinComprasEmbed(
-                            interaction.user
-                        )
-                    ]
-                });
-            }
-
-            // -----------------------------------------------
-            // CON COMPRAS
-            // -----------------------------------------------
-
-            // IMPORTANTE:
-            // NO ephemeral.
-            // Todo el servidor puede verlo.
-
-            return interaction.reply({
-
-                embeds: [
-
-                    crearPerfilEmbed(
-                        interaction.user,
-                        datos,
-                        config.precio1k
-                    )
-                ]
-            });
-        }
-
-        // ====================================================
-        // ADDCOMPRA
-        // ====================================================
-
-        if (
-            interaction.commandName ===
-            "addcompra"
-        ) {
-
-            if (
-                !esOwner(interaction)
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Solo el Owner puede utilizar este comando.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            const usuario =
-                interaction.options.getUser(
-                    "usuario"
-                );
-
-            const cantidad =
-                interaction.options.getInteger(
-                    "cantidad"
-                );
-
-            if (
-                cantidad <= 0
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ La cantidad debe ser mayor a 0.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            await interaction.deferReply({
-                ephemeral:
-                    true
-            });
-
-            try {
-
-                const db =
-                    cargarDB();
-
-                const guildId =
-                    interaction.guild.id;
 
                 const config =
                     obtenerConfigKaamStore(
+
                         db,
-                        guildId
+
+                        interaction.guild.id
                     );
 
-                // --------------------------------------------
-                // CREAR USUARIO
-                // --------------------------------------------
+                const anterior =
+                    config.precio1k;
 
-                if (
-                    !config.usuarios[
-                        usuario.id
-                    ]
-                ) {
-
-                    config.usuarios[
-                        usuario.id
-                    ] = {
-
-                        robuxTotales:
-                            0,
-
-                        dineroGastado:
-                            0,
-
-                        compras:
-                            0,
-
-                        historial:
-                            []
-                    };
-                }
-
-                const datos =
-                    config.usuarios[
-                        usuario.id
-                    ];
-
-                // --------------------------------------------
-                // PRECIO
-                // --------------------------------------------
-
-                const precio =
-                    calcularPrecio(
-                        cantidad,
-                        config.precio1k
+                config.precio1k =
+                    Number(
+                        nuevoPrecio.toFixed(
+                            2
+                        )
                     );
-
-                // --------------------------------------------
-                // ACTUALIZAR TOTALES
-                // --------------------------------------------
-
-                datos.robuxTotales =
-                    Number(
-                        datos.robuxTotales || 0
-                    ) +
-                    cantidad;
-
-                datos.dineroGastado =
-                    Number(
-                        datos.dineroGastado || 0
-                    ) +
-                    precio;
-
-                datos.compras =
-                    Number(
-                        datos.compras || 0
-                    ) +
-                    1;
-
-                // --------------------------------------------
-                // REFERENCIA
-                // --------------------------------------------
-
-                const referencia =
-                    crearReferencia();
-
-                const compra = {
-
-                    referencia,
-
-                    cantidad,
-
-                    precio:
-                        Number(
-                            precio.toFixed(2)
-                        ),
-
-                    precioBase:
-                        Number(
-                            config.precio1k.toFixed(2)
-                        ),
-
-                    robuxTotales:
-                        datos.robuxTotales,
-
-                    dineroGastado:
-                        Number(
-                            datos.dineroGastado.toFixed(2)
-                        ),
-
-                    fecha:
-                        new Date()
-                            .toISOString(),
-
-                    agregadoPor:
-                        interaction.user.id
-                };
-
-                // --------------------------------------------
-                // HISTORIAL
-                // --------------------------------------------
-
-                if (
-                    !Array.isArray(
-                        datos.historial
-                    )
-                ) {
-
-                    datos.historial =
-                        [];
-                }
-
-                datos.historial.push(
-                    compra
-                );
 
                 guardarDB(
                     db
                 );
 
-                // --------------------------------------------
-                // ROLES
-                // --------------------------------------------
-
-                await actualizarRoles(
-
-                    interaction.guild,
-
-                    usuario.id,
-
-                    datos.robuxTotales,
-
-                    config
-                );
-
-                // --------------------------------------------
-                // AUTOVOUCH
-                // --------------------------------------------
-
-                await enviarAutovouch(
-
-                    interaction.guild,
-
-                    config,
-
-                    usuario,
-
-                    compra
-                );
-
-                const rango =
-                    obtenerRango(
-                        datos.robuxTotales
-                    );
-
-                return interaction.editReply({
+                await interaction.editReply({
 
                     embeds: [
 
@@ -3374,76 +3412,34 @@ client.on(
                             )
 
                             .setTitle(
-                                "✅ Compra registrada"
+                                "💰 Precio actualizado"
                             )
 
                             .setDescription(
-                                `La compra de ${usuario} fue registrada correctamente en **KaamStore**.`
+                                "El precio base fue cambiado correctamente."
                             )
 
                             .addFields(
 
                                 {
+
                                     name:
-                                        "👤 Cliente",
+                                        "Anterior",
 
                                     value:
-                                        `${usuario}`,
+                                        `1K = **$${formatearUSD(anterior)} USD**`,
 
                                     inline:
                                         true
                                 },
 
                                 {
+
                                     name:
-                                        "🧾 Referencia",
+                                        "Nuevo",
 
                                     value:
-                                        `\`${referencia}\``,
-
-                                    inline:
-                                        true
-                                },
-
-                                {
-                                    name:
-                                        "🛒 Compra",
-
-                                    value:
-                                        `${ROBUX_EMOJI} **${formatearRobux(cantidad)} Robux**`,
-
-                                    inline:
-                                        true
-                                },
-
-                                {
-                                    name:
-                                        "💵 Precio",
-
-                                    value:
-                                        `**$${formatearUSD(precio)} USD**`,
-
-                                    inline:
-                                        true
-                                },
-
-                                {
-                                    name:
-                                        `${ROBUX_EMOJI} Total`,
-
-                                    value:
-                                        `**${formatearRobux(datos.robuxTotales)} Robux**`,
-
-                                    inline:
-                                        true
-                                },
-
-                                {
-                                    name:
-                                        "🏆 Rango",
-
-                                    value:
-                                        `**${rango.nombre}**`,
+                                        `1K = **$${formatearUSD(config.precio1k)} USD**`,
 
                                     inline:
                                         true
@@ -3453,24 +3449,361 @@ client.on(
                             .setFooter({
 
                                 text:
-                                    "KaamStore • Compra registrada"
+                                    "Las compras anteriores mantienen su precio original."
                             })
 
                             .setTimestamp()
+
                     ]
                 });
 
-            } catch (error) {
-
-                console.error(
-                    "❌ ERROR ADDCOMPRA:",
-                    error
-                );
-
-                return interaction.editReply(
-                    "❌ Ocurrió un error registrando la compra."
-                );
+                return;
             }
+
+            // ====================================================
+            // ADDCOMPRA
+            // ====================================================
+
+            if (
+                interaction.commandName ===
+                "addcompra"
+            ) {
+
+                // RESPUESTA INMEDIATA
+                await interaction.deferReply({
+
+                    ephemeral:
+                        true
+                });
+
+                const usuario =
+                    interaction.options.getUser(
+                        "usuario"
+                    );
+
+                const cantidad =
+                    interaction.options.getInteger(
+                        "cantidad"
+                    );
+
+                if (
+                    !cantidad ||
+                    cantidad <= 0
+                ) {
+
+                    await interaction.editReply(
+                        "❌ La cantidad debe ser mayor a 0."
+                    );
+
+                    return;
+                }
+
+                try {
+
+                    const db =
+                        cargarDB();
+
+                    const config =
+                        obtenerConfigKaamStore(
+
+                            db,
+
+                            interaction.guild.id
+                        );
+
+                    if (
+                        !config.usuarios[
+                            usuario.id
+                        ]
+                    ) {
+
+                        config.usuarios[
+                            usuario.id
+                        ] = {
+
+                            robuxTotales:
+                                0,
+
+                            dineroGastado:
+                                0,
+
+                            compras:
+                                0,
+
+                            historial:
+                                []
+                        };
+                    }
+
+                    const datos =
+                        config.usuarios[
+                            usuario.id
+                        ];
+
+                    if (
+                        !Array.isArray(
+                            datos.historial
+                        )
+                    ) {
+
+                        datos.historial =
+                            [];
+                    }
+
+                    const precio =
+                        calcularPrecio(
+
+                            cantidad,
+
+                            config.precio1k
+                        );
+
+                    datos.robuxTotales =
+                        Number(
+                            datos.robuxTotales ||
+                            0
+                        ) +
+                        cantidad;
+
+                    datos.dineroGastado =
+                        Number(
+                            datos.dineroGastado ||
+                            0
+                        ) +
+                        precio;
+
+                    datos.compras =
+                        Number(
+                            datos.compras ||
+                            0
+                        ) +
+                        1;
+
+                    const referencia =
+                        crearReferencia();
+
+                    const compra =
+                        {
+
+                            referencia,
+
+                            cantidad,
+
+                            precio:
+                                Number(
+                                    precio.toFixed(
+                                        2
+                                    )
+                                ),
+
+                            precioBase:
+                                Number(
+                                    config.precio1k.toFixed(
+                                        2
+                                    )
+                                ),
+
+                            robuxTotales:
+                                datos.robuxTotales,
+
+                            dineroGastado:
+                                Number(
+                                    datos.dineroGastado.toFixed(
+                                        2
+                                    )
+                                ),
+
+                            fecha:
+                                new Date()
+                                    .toISOString(),
+
+                            agregadoPor:
+                                interaction.user.id
+                        };
+
+                    datos.historial.push(
+                        compra
+                    );
+
+                    // GUARDAR ANTES DE ROLES/AUTOVOUCH
+                    // PARA NO PERDER LA COMPRA
+                    guardarDB(
+                        db
+                    );
+
+                    // Intentar actualizar roles
+                    await actualizarRoles(
+
+                        interaction.guild,
+
+                        usuario.id,
+
+                        datos.robuxTotales,
+
+                        config
+                    );
+
+                    // Intentar enviar autovouch
+                    await enviarAutovouch(
+
+                        interaction.guild,
+
+                        config,
+
+                        usuario,
+
+                        compra
+                    );
+
+                    const rango =
+                        obtenerRango(
+                            datos.robuxTotales
+                        );
+
+                    await interaction.editReply({
+
+                        embeds: [
+
+                            new EmbedBuilder()
+
+                                .setColor(
+                                    0x57F287
+                                )
+
+                                .setTitle(
+                                    "✅ Compra registrada"
+                                )
+
+                                .setDescription(
+                                    `La compra de ${usuario} fue registrada correctamente en **KaamStore**.`
+                                )
+
+                                .addFields(
+
+                                    {
+
+                                        name:
+                                            "👤 Cliente",
+
+                                        value:
+                                            `${usuario}`,
+
+                                        inline:
+                                            true
+                                    },
+
+                                    {
+
+                                        name:
+                                            "🧾 Referencia",
+
+                                        value:
+                                            `\`${referencia}\``,
+
+                                        inline:
+                                            true
+                                    },
+
+                                    {
+
+                                        name:
+                                            "🛒 Compra",
+
+                                        value:
+                                            `${ROBUX_EMOJI} **${formatearRobux(cantidad)} Robux**`,
+
+                                        inline:
+                                            true
+                                    },
+
+                                    {
+
+                                        name:
+                                            "💵 Precio",
+
+                                        value:
+                                            `**$${formatearUSD(precio)} USD**`,
+
+                                        inline:
+                                            true
+                                    },
+
+                                    {
+
+                                        name:
+                                            `${ROBUX_EMOJI} Total comprado`,
+
+                                        value:
+                                            `**${formatearRobux(datos.robuxTotales)} Robux**`,
+
+                                        inline:
+                                            true
+                                    },
+
+                                    {
+
+                                        name:
+                                            "🏆 Rango",
+
+                                        value:
+                                            `**${rango.nombre}**`,
+
+                                        inline:
+                                            true
+                                    }
+                                )
+
+                                .setFooter({
+
+                                    text:
+                                        "KaamStore • Compra registrada"
+                                })
+
+                                .setTimestamp()
+
+                        ]
+                    });
+
+                    return;
+
+                } catch (error) {
+
+                    console.error(
+                        "❌ ERROR ADDCOMPRA:",
+                        error
+                    );
+
+                    await interaction.editReply(
+                        "❌ Ocurrió un error registrando la compra."
+                    );
+
+                    return;
+                }
+            }
+
+            // ====================================================
+            // COMANDO NO MANEJADO
+            // ====================================================
+
+            console.warn(
+                `⚠️ COMANDO SIN MANEJADOR: /${interaction.commandName}`
+            );
+
+            await interaction.reply({
+
+                content:
+                    "❌ Ese comando no tiene un manejador configurado.",
+
+                ephemeral:
+                    true
+            });
+
+        } catch (error) {
+
+            await responderError(
+                interaction,
+                error
+            );
         }
     }
 );
@@ -3479,6 +3812,25 @@ client.on(
 // LOGIN
 // ============================================================
 
-client.login(
-    TOKEN
-);
+if (!TOKEN) {
+
+    console.error(
+        "❌ El bot no puede iniciar porque falta DISCORD_TOKEN."
+    );
+
+} else {
+
+    client.login(
+        TOKEN
+    )
+
+        .catch(
+            error => {
+
+                console.error(
+                    "❌ Error iniciando sesión en Discord:",
+                    error
+                );
+            }
+        );
+}
