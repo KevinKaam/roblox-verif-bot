@@ -107,11 +107,6 @@ if (!CLIENT_ID) {
     );
 }
 
-if (!ENCRYPTION_SECRET) {
-    console.error(
-        "❌ Falta ENCRYPTION_SECRET."
-    );
-}
 
 // ============================================================
 // BASE DE DATOS
@@ -384,152 +379,37 @@ async function obtenerUserId(input) {
 }
 
 // ============================================================
-// ROBLOX OPEN CLOUD - GRUPO
+// ROBLOX API PÚBLICA - SIN API KEY
 // ============================================================
 
-async function obtenerGrupo(
-    groupId,
-    apiKey
-) {
-
+async function obtenerGrupoPublico(groupId) {
     try {
-
-        const response =
-            await axios.get(
-                `https://apis.roblox.com/cloud/v2/groups/${groupId}`,
-                {
-                    headers: {
-                        "x-api-key":
-                            apiKey,
-                        "Accept":
-                            "application/json"
-                    },
-                    timeout: 15000
-                }
-            );
-
-        return response.data;
-
-    } catch (error) {
-
-        const status =
-            error.response?.status;
-
-        console.error(
-            `❌ Error obteniendo grupo ${groupId}:`,
-            status,
-            error.response?.data ||
-            error.message
+        const response = await axios.get(
+            `https://groups.roblox.com/v1/groups/${groupId}`,
+            { timeout: 15000 }
         );
-
-        if (status === 401) {
-            throw new Error(
-                "API_KEY_INVALID"
-            );
-        }
-
-        if (status === 403) {
-            throw new Error(
-                "API_KEY_FORBIDDEN"
-            );
-        }
-
-        if (status === 404) {
-            throw new Error(
-                "GROUP_NOT_FOUND"
-            );
-        }
-
-        if (status === 429) {
-            throw new Error(
-                "ROBLOX_RATE_LIMIT"
-            );
-        }
-
+        return response.data;
+    } catch (error) {
+        const status = error.response?.status;
+        console.error(`❌ Error obteniendo grupo ${groupId}:`, status, error.response?.data || error.message);
+        if (status === 404) throw new Error('GROUP_NOT_FOUND');
+        if (status === 429) throw new Error('ROBLOX_RATE_LIMIT');
         throw error;
     }
 }
 
-// ============================================================
-// ROBLOX OPEN CLOUD - MEMBERSHIP
-// ============================================================
-
-async function obtenerMembresia(
-    groupId,
-    userId,
-    apiKey
-) {
-
+async function obtenerGruposPublicosUsuario(userId) {
     try {
-
-        const response =
-            await axios.get(
-                `https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships`,
-                {
-                    params: {
-                        maxPageSize: 10,
-                        filter:
-                            `user == 'users/${userId}'`
-                    },
-
-                    headers: {
-                        "x-api-key":
-                            apiKey,
-                        "Accept":
-                            "application/json"
-                    },
-
-                    timeout: 15000
-                }
-            );
-
-        const memberships =
-            response.data?.groupMemberships ||
-            [];
-
-        if (
-            memberships.length === 0
-        ) {
-
-            return null;
-        }
-
-        return memberships[0];
-
-    } catch (error) {
-
-        const status =
-            error.response?.status;
-
-        console.error(
-            `❌ Error membership ${groupId}/${userId}:`,
-            status
+        const response = await axios.get(
+            `https://groups.roblox.com/v2/users/${userId}/groups/roles`,
+            { timeout: 20000 }
         );
-
-        if (status === 401) {
-            throw new Error(
-                "API_KEY_INVALID"
-            );
-        }
-
-        if (status === 403) {
-            throw new Error(
-                "API_KEY_FORBIDDEN"
-            );
-        }
-
-        if (status === 404) {
-            throw new Error(
-                "GROUP_NOT_FOUND"
-            );
-        }
-
-        if (status === 429) {
-            throw new Error(
-                "ROBLOX_RATE_LIMIT"
-            );
-        }
-
+        return Array.isArray(response.data?.data) ? response.data.data : [];
+    } catch (error) {
+        const status = error.response?.status;
+        console.error(`❌ Error consultando grupos del usuario ${userId}:`, status, error.response?.data || error.message);
+        if (status === 429) throw new Error('ROBLOX_RATE_LIMIT');
+        if (status === 404) throw new Error('ROBLOX_USER_NOT_FOUND');
         throw error;
     }
 }
@@ -572,128 +452,21 @@ function calcularDias(createTime) {
 // RESULTADO DE GRUPO
 // ============================================================
 
-function crearResultado(
-    grupo,
-    config,
-    membership
-) {
+function crearResultado(grupo, config, esMiembro) {
+    const groupId = String(grupo.id || config.groupId);
+    const nombre = grupo.name || grupo.displayName || config.name || `Grupo ${groupId}`;
+    const link = `https://www.roblox.com/groups/${groupId}`;
+    const requerido = Number(config.dias) || 15;
 
-    const groupId =
-        grupo.id?.toString() ||
-        config.groupId;
-
-    const nombre =
-        grupo.displayName ||
-        grupo.name ||
-        config.name ||
-        `Grupo ${groupId}`;
-
-    const link =
-        `https://www.roblox.com/groups/${groupId}`;
-
-    const requerido =
-        config.dias;
-
-    if (!membership) {
-
-        return {
-
-            groupId,
-            nombre,
-            link,
-
-            unido: false,
-
-            dias: null,
-
-            requerido,
-
-            elegible: false,
-
-            icono: "🔴",
-
-            texto:
-                "sin unirse"
-        };
+    if (!esMiembro) {
+        return { groupId, nombre, link, unido: false, dias: null, requerido,
+            elegible: false, icono: '🔴', texto: 'sin unirse' };
     }
 
-    const dias =
-        calcularDias(
-            membership.createTime
-        );
-
-    if (
-        dias === null
-    ) {
-
-        return {
-
-            groupId,
-            nombre,
-            link,
-
-            unido: true,
-
-            dias: null,
-
-            requerido,
-
-            elegible: false,
-
-            icono: "🟡",
-
-            texto:
-                "miembro — antigüedad no disponible"
-        };
-    }
-
-    if (
-        dias >= requerido
-    ) {
-
-        return {
-
-            groupId,
-            nombre,
-            link,
-
-            unido: true,
-
-            dias,
-
-            requerido,
-
-            elegible: true,
-
-            icono: "🟢",
-
-            texto:
-                `elegible — ${dias}d en el grupo`
-        };
-    }
-
-    const faltan =
-        requerido - dias;
-
-    return {
-
-        groupId,
-        nombre,
-        link,
-
-        unido: true,
-
-        dias,
-
-        requerido,
-
-        elegible: false,
-
-        icono: "🟡",
-
-        texto:
-            `miembro — ${dias}d en el grupo • faltan ${faltan}d`
-    };
+    // El endpoint público de grupos confirma pertenencia, pero no entrega
+    // la fecha de ingreso. No se inventa antigüedad ni se usa un contador local.
+    return { groupId, nombre, link, unido: true, dias: null, requerido,
+        elegible: false, icono: '🟡', texto: 'miembro — fecha de ingreso no disponible públicamente' };
 }
 
 // ============================================================
@@ -708,57 +481,29 @@ function crearEmbed(
     const total =
         resultados.length;
 
-    const elegibles =
-        resultados.filter(
-            r => r.elegible
-        ).length;
-
-    const unidos =
-        resultados.filter(
-            r => r.unido
-        ).length;
-
-    const restantes =
-        total -
-        elegibles;
+    const elegibles = resultados.filter(r => r.elegible).length;
+    const unidos = resultados.filter(r => r.unido).length;
+    const sinUnirse = total - unidos;
+    const antiguedadPendiente = resultados.filter(r => r.unido && r.dias === null).length;
 
     let titulo;
     let color;
-
-    if (
-        elegibles === total
-    ) {
-
-        titulo =
-            "🟢 Verificación completa";
-
-        color =
-            0x57F287;
-
-    } else if (
-        unidos > 0
-    ) {
-
-        titulo =
-            "⚠️ Verificación parcial";
-
-        color =
-            0xFEE75C;
-
+    if (sinUnirse === 0 && antiguedadPendiente === 0 && elegibles === total) {
+        titulo = "🟢 Verificación completa";
+        color = 0x57F287;
+    } else if (unidos > 0) {
+        titulo = "⚠️ Verificación de pertenencia";
+        color = 0xFEE75C;
     } else {
-
-        titulo =
-            "🔴 Verificación fallida";
-
-        color =
-            0xED4245;
+        titulo = "🔴 Verificación fallida";
+        color = 0xED4245;
     }
 
     let lista = "";
 
     for (
         const resultado
-        of resultados
+        of resultados.slice(0, 25)
     ) {
 
         lista +=
@@ -782,8 +527,8 @@ function crearEmbed(
                 "📋 Resultado",
 
             value:
-                `🟢 **${elegibles}** elegible(s) • ` +
-                `🔴 **${restantes}** restante(s)`
+                `👥 **${unidos}** miembro(s) • 🔴 **${sinUnirse}** sin unirse\n` +
+                `🟢 **${elegibles}** elegible(s) • 🟡 **${antiguedadPendiente}** con antigüedad no disponible`
         })
 
         .addFields({
@@ -799,7 +544,7 @@ function crearEmbed(
         .setFooter({
 
             text:
-                "KaamStore BOT • Roblox Open Cloud"
+                "KaamStore BOT • Verificación pública de Roblox"
         })
 
         .setTimestamp();
@@ -822,7 +567,7 @@ function crearBotones(
 
     for (
         const resultado
-        of resultados
+        of resultados.slice(0, 25)
     ) {
 
         if (
@@ -881,87 +626,19 @@ function crearBotones(
 // ============================================================
 
 function crearTutorial() {
-
     return new EmbedBuilder()
-
-        .setColor(
-            0x5865F2
-        )
-
-        .setTitle(
-            "🔑 Tutorial — KaamStore BOT"
-        )
-
+        .setColor(0x5865F2)
+        .setTitle('🔎 Verificación pública de Roblox')
         .setDescription(
-            "Configura una API Key de Roblox Open Cloud para que el bot pueda verificar grupos."
+            'KaamStore BOT consulta los grupos públicos del perfil de Roblox. **No necesitas API Key ni permisos del dueño del grupo.**'
         )
-
         .addFields(
-
-            {
-                name:
-                    "1️⃣ Creator Dashboard",
-
-                value:
-                    "[Abrir API Keys de Roblox](https://create.roblox.com/dashboard/credentials)"
-            },
-
-            {
-                name:
-                    "2️⃣ Crear API Key",
-
-                value:
-                    "Pulsa **Create API Key**."
-            },
-
-            {
-                name:
-                    "3️⃣ Seleccionar Group",
-
-                value:
-                    "Configura los permisos relacionados con el grupo."
-            },
-
-            {
-                name:
-                    "4️⃣ Permisos",
-
-                value:
-                    "El bot necesita permisos de lectura para consultar la información."
-            },
-
-            {
-                name:
-                    "5️⃣ Añadir grupo",
-
-                value:
-                    "`/addgroup group_id:123456 api_key:TU_KEY dias:3 verificado:si`"
-            },
-
-            {
-                name:
-                    "⭐ Requisitos",
-
-                value:
-                    "🟢 Verificado → **3 días**\n" +
-                    "🔴 No verificado → **15 días**"
-            },
-
-            {
-                name:
-                    "⚠️ Seguridad",
-
-                value:
-                    "Nunca publiques tu API Key."
-            }
+            { name: '1️⃣ Añadir un grupo', value: '`/addgroup group_id:123456 dias:15 verificado:no`' },
+            { name: '2️⃣ Consultar un usuario', value: '`/user usuario:NombreDeRoblox`' },
+            { name: '3️⃣ Eliminar un grupo', value: '`/removegroup group_id:123456`' },
+            { name: '⚠️ Importante sobre la antigüedad', value: 'Roblox permite consultar públicamente si el usuario pertenece al grupo, pero esta consulta no devuelve la fecha de ingreso. El bot mostrará la pertenencia y señalará que la antigüedad no está disponible; no inventará días ni fechas.' }
         )
-
-        .setFooter({
-
-            text:
-                "KaamStore BOT"
-        })
-
+        .setFooter({ text: 'KaamStore BOT' })
         .setTimestamp();
 }
 
@@ -1719,120 +1396,44 @@ client.once(
                 ),
 
             // ------------------------------------------------
-            // ADDGROUP
+            // ADDGROUP (SIN API KEY)
             // ------------------------------------------------
 
             new SlashCommandBuilder()
+                .setName('addgroup')
+                .setDescription('Añade un grupo público de Roblox')
+                .addStringOption(option => option
+                    .setName('group_id')
+                    .setDescription('ID o URL del grupo')
+                    .setRequired(true))
+                .addIntegerOption(option => option
+                    .setName('dias')
+                    .setDescription('3 o 15 días de requisito')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: '3 días', value: 3 },
+                        { name: '15 días', value: 15 }
+                    ))
+                .addStringOption(option => option
+                    .setName('verificado')
+                    .setDescription('¿Está verificado?')
+                    .setRequired(true)
+                    .addChoices(
+                        { name: 'Sí', value: 'si' },
+                        { name: 'No', value: 'no' }
+                    )),
 
-                .setName(
-                    "addgroup"
-                )
+            // ------------------------------------------------
+            // REMOVEGROUP
+            // ------------------------------------------------
 
-                .setDescription(
-                    "Añade un grupo de Roblox"
-                )
-
-                .addStringOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "group_id"
-                            )
-
-                            .setDescription(
-                                "ID o URL del grupo"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addStringOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "api_key"
-                            )
-
-                            .setDescription(
-                                "API Key de Roblox"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-                )
-
-                .addIntegerOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "dias"
-                            )
-
-                            .setDescription(
-                                "3 o 15 días"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-
-                            .addChoices(
-
-                                {
-                                    name:
-                                        "3 días",
-                                    value:
-                                        3
-                                },
-
-                                {
-                                    name:
-                                        "15 días",
-                                    value:
-                                        15
-                                }
-                            )
-                )
-
-                .addStringOption(
-                    option =>
-                        option
-
-                            .setName(
-                                "verificado"
-                            )
-
-                            .setDescription(
-                                "¿Está verificado?"
-                            )
-
-                            .setRequired(
-                                true
-                            )
-
-                            .addChoices(
-
-                                {
-                                    name:
-                                        "Sí",
-                                    value:
-                                        "si"
-                                },
-
-                                {
-                                    name:
-                                        "No",
-                                    value:
-                                        "no"
-                                }
-                            )
-                ),
+            new SlashCommandBuilder()
+                .setName('removegroup')
+                .setDescription('Elimina un grupo de la verificación')
+                .addStringOption(option => option
+                    .setName('group_id')
+                    .setDescription('ID o URL del grupo')
+                    .setRequired(true)),
 
             // ------------------------------------------------
             // TUTORIAL
@@ -1913,6 +1514,30 @@ client.once(
                                 true
                             )
                 ),
+
+            // ------------------------------------------------
+            // TOP COMPRADORES
+            // ------------------------------------------------
+
+            new SlashCommandBuilder()
+                .setName('top')
+                .setDescription('Muestra el top 10 de compradores de KaamStore'),
+
+            // ------------------------------------------------
+            // QUITAR COMPRA
+            // ------------------------------------------------
+
+            new SlashCommandBuilder()
+                .setName('quitarcompra')
+                .setDescription('Elimina una compra del historial de un cliente')
+                .addUserOption(option => option
+                    .setName('usuario')
+                    .setDescription('Cliente al que pertenece la compra')
+                    .setRequired(true))
+                .addStringOption(option => option
+                    .setName('referencia')
+                    .setDescription('Referencia exacta de la compra')
+                    .setRequired(true)),
 
             // ------------------------------------------------
             // CONFIG
@@ -2122,7 +1747,7 @@ client.once(
             );
 
             console.log(
-                "✅ Comandos globales registrados."
+                "✅ Comandos slash registrados correctamente."
             );
 
         } catch (error) {
@@ -2136,7 +1761,7 @@ client.once(
 );
 
 // ============================================================
-// INTERACCIONES
+// EVENTO INTERACTIONS
 // ============================================================
 
 client.on(
@@ -2146,7 +1771,6 @@ client.on(
         if (
             !interaction.isChatInputCommand()
         ) {
-
             return;
         }
 
@@ -2159,23 +1783,10 @@ client.on(
             "tutorial"
         ) {
 
-            if (
-                !esOwner(interaction)
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Solo el Owner puede utilizar este comando.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
             return interaction.reply({
 
                 embeds: [
+
                     crearTutorial()
                 ],
 
@@ -2185,282 +1796,80 @@ client.on(
         }
 
         // ====================================================
-        // ADDGROUP
+        // ADDGROUP (SIN API KEY)
         // ====================================================
 
-        if (
-            interaction.commandName ===
-            "addgroup"
-        ) {
-
-            if (
-                !esOwner(interaction)
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Solo el Owner puede utilizar este comando.",
-
-                    ephemeral:
-                        true
-                });
+        if (interaction.commandName === 'addgroup') {
+            if (!esOwner(interaction)) {
+                return interaction.reply({ content: '❌ Solo el Owner puede utilizar este comando.', ephemeral: true });
             }
 
-            const groupInput =
-                interaction.options.getString(
-                    "group_id"
-                );
-
-            const apiKey =
-                interaction.options.getString(
-                    "api_key"
-                );
-
-            const dias =
-                interaction.options.getInteger(
-                    "dias"
-                );
-
-            const verificado =
-                interaction.options.getString(
-                    "verificado"
-                );
-
-            const groupId =
-                extraerGroupId(
-                    groupInput
-                );
+            const groupId = extraerGroupId(interaction.options.getString('group_id'));
+            const dias = interaction.options.getInteger('dias');
+            const verificado = interaction.options.getString('verificado');
 
             if (!groupId) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ No pude reconocer el Group ID.",
-
-                    ephemeral:
-                        true
-                });
+                return interaction.reply({ content: '❌ No pude reconocer el Group ID. Usa el ID o la URL del grupo.', ephemeral: true });
             }
 
-            if (
-                verificado === "si" &&
-                dias !== 3
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Un grupo verificado debe tener **3 días**.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            if (
-                verificado === "no" &&
-                dias !== 15
-            ) {
-
-                return interaction.reply({
-
-                    content:
-                        "❌ Un grupo no verificado debe tener **15 días**.",
-
-                    ephemeral:
-                        true
-                });
-            }
-
-            await interaction.deferReply({
-                ephemeral:
-                    true
-            });
+            await interaction.deferReply({ ephemeral: true });
 
             try {
+                const grupo = await obtenerGrupoPublico(groupId);
+                const db = cargarDB();
+                const guildId = interaction.guild.id;
 
-                const grupo =
-                    await obtenerGrupo(
-                        groupId,
-                        apiKey
-                    );
-
-                const nombre =
-                    grupo.displayName ||
-                    grupo.name ||
-                    `Grupo ${groupId}`;
-
-                const db =
-                    cargarDB();
-
-                const guildId =
-                    interaction.guild.id;
-
-                if (
-                    !db[guildId]
-                ) {
-
-                    db[guildId] = {};
-                }
-
+                db[guildId] = db[guildId] || {};
                 db[guildId][groupId] = {
-
                     groupId,
-
-                    name:
-                        nombre,
-
-                    apiKey:
-                        cifrar(
-                            apiKey
-                        ),
-
+                    name: grupo.name,
                     dias,
-
-                    verificado:
-                        verificado === "si",
-
-                    addedBy:
-                        interaction.user.id,
-
-                    addedAt:
-                        new Date()
-                            .toISOString()
+                    verificado,
+                    addedBy: interaction.user.id,
+                    addedAt: new Date().toISOString()
                 };
 
-                guardarDB(
-                    db
-                );
+                guardarDB(db);
 
-                return interaction.editReply({
-
-                    embeds: [
-
-                        new EmbedBuilder()
-
-                            .setColor(
-                                0x57F287
-                            )
-
-                            .setTitle(
-                                "✅ Grupo configurado"
-                            )
-
-                            .setDescription(
-                                `**${nombre}** fue añadido correctamente.`
-                            )
-
-                            .addFields(
-
-                                {
-                                    name:
-                                        "🆔 Group ID",
-
-                                    value:
-                                        `\`${groupId}\``,
-
-                                    inline:
-                                        true
-                                },
-
-                                {
-                                    name:
-                                        "⭐ Verificado",
-
-                                    value:
-                                        verificado === "si"
-                                            ? "🟢 Sí"
-                                            : "🔴 No",
-
-                                    inline:
-                                        true
-                                },
-
-                                {
-                                    name:
-                                        "📅 Días",
-
-                                    value:
-                                        `**${dias} días**`,
-
-                                    inline:
-                                        true
-                                }
-                            )
-
-                            .setFooter({
-
-                                text:
-                                    "KaamStore BOT"
-                            })
-
-                            .setTimestamp()
-                    ]
-                });
-
+                return interaction.editReply({ embeds: [new EmbedBuilder()
+                    .setColor(0x57F287)
+                    .setTitle('✅ Grupo añadido')
+                    .setDescription(`**${grupo.name}** fue añadido correctamente sin API Key.`)
+                    .addFields(
+                        { name: '🆔 Group ID', value: `\`${groupId}\``, inline: true },
+                        { name: '⭐ Verificado', value: verificado === 'si' ? '🟢 Sí' : '🔴 No', inline: true },
+                        { name: '📅 Requisito', value: `**${dias} días**`, inline: true }
+                    )
+                    .setFooter({ text: 'KaamStore BOT • API pública de Roblox' })
+                    .setTimestamp()] });
             } catch (error) {
-
-                console.error(
-                    "❌ ERROR ADDGROUP:",
-                    error
-                );
-
-                if (
-                    error.message ===
-                    "API_KEY_INVALID"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ API Key inválida."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "API_KEY_FORBIDDEN"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ La API Key no tiene acceso a ese grupo."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "GROUP_NOT_FOUND"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ Grupo no encontrado."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "ROBLOX_RATE_LIMIT"
-                ) {
-
-                    return interaction.editReply(
-                        "⏳ Roblox está limitando temporalmente las peticiones."
-                    );
-                }
-
-                if (
-                    error.message ===
-                    "ENCRYPTION_SECRET_MISSING"
-                ) {
-
-                    return interaction.editReply(
-                        "❌ Falta ENCRYPTION_SECRET en Render."
-                    );
-                }
-
-                return interaction.editReply(
-                    "❌ Ocurrió un error conectando con Roblox."
-                );
+                console.error('❌ ERROR ADDGROUP:', error);
+                if (error.message === 'GROUP_NOT_FOUND') return interaction.editReply('❌ Grupo no encontrado. Comprueba el ID o la URL.');
+                if (error.message === 'ROBLOX_RATE_LIMIT') return interaction.editReply('⏳ Roblox está limitando temporalmente las peticiones. Inténtalo de nuevo en unos minutos.');
+                return interaction.editReply('❌ No pude consultar el grupo en Roblox. Comprueba que el grupo sea público e inténtalo de nuevo.');
             }
+        }
+
+        // ====================================================
+        // REMOVEGROUP
+        // ====================================================
+
+        if (interaction.commandName === 'removegroup') {
+            if (!esOwner(interaction)) {
+                return interaction.reply({ content: '❌ Solo el Owner puede utilizar este comando.', ephemeral: true });
+            }
+            const groupId = extraerGroupId(interaction.options.getString('group_id'));
+            if (!groupId) return interaction.reply({ content: '❌ No pude reconocer el Group ID.', ephemeral: true });
+
+            const db = cargarDB();
+            const guildId = interaction.guild.id;
+            if (!db[guildId]?.[groupId]) {
+                return interaction.reply({ content: '❌ Ese grupo no está configurado en este servidor.', ephemeral: true });
+            }
+            const nombre = db[guildId][groupId].name || `Grupo ${groupId}`;
+            delete db[guildId][groupId];
+            guardarDB(db);
+            return interaction.reply({ content: `✅ **${nombre}** (\`${groupId}\`) fue eliminado de la verificación.`, ephemeral: true });
         }
 
         // ====================================================
@@ -2534,150 +1943,21 @@ client.on(
                 }
 
                 const resultados = [];
+                const gruposPublicos = await obtenerGruposPublicosUsuario(userId);
+                const membresias = new Map();
+                for (const item of gruposPublicos) {
+                    const id = item.group?.id ?? item.id;
+                    if (id !== undefined && id !== null) membresias.set(String(id), item);
+                }
 
-                for (
-                    const groupId
-                    of groupIds
-                ) {
-
-                    const config =
-                        grupos[groupId];
-
-                    let apiKey;
-
-                    try {
-
-                        apiKey =
-                            descifrar(
-                                config.apiKey
-                            );
-
-                    } catch {
-
-                        resultados.push({
-
-                            groupId,
-
-                            nombre:
-                                config.name ||
-                                `Grupo ${groupId}`,
-
-                            link:
-                                `https://www.roblox.com/groups/${groupId}`,
-
-                            unido:
-                                false,
-
-                            dias:
-                                null,
-
-                            requerido:
-                                config.dias,
-
-                            elegible:
-                                false,
-
-                            icono:
-                                "⚠️",
-
-                            texto:
-                                "API Key ilegible"
-                        });
-
-                        continue;
-                    }
-
-                    try {
-
-                        const grupo =
-                            await obtenerGrupo(
-                                groupId,
-                                apiKey
-                            );
-
-                        const membership =
-                            await obtenerMembresia(
-                                groupId,
-                                userId,
-                                apiKey
-                            );
-
-                        resultados.push(
-
-                            crearResultado(
-                                grupo,
-                                config,
-                                membership
-                            )
-                        );
-
-                    } catch (error) {
-
-                        let texto =
-                            "error consultando Roblox";
-
-                        if (
-                            error.message ===
-                            "API_KEY_INVALID"
-                        ) {
-
-                            texto =
-                                "API Key inválida";
-
-                        } else if (
-                            error.message ===
-                            "API_KEY_FORBIDDEN"
-                        ) {
-
-                            texto =
-                                "API Key sin permiso";
-
-                        } else if (
-                            error.message ===
-                            "ROBLOX_RATE_LIMIT"
-                        ) {
-
-                            texto =
-                                "límite de Roblox";
-
-                        } else if (
-                            error.message ===
-                            "GROUP_NOT_FOUND"
-                        ) {
-
-                            texto =
-                                "grupo no encontrado";
-                        }
-
-                        resultados.push({
-
-                            groupId,
-
-                            nombre:
-                                config.name ||
-                                `Grupo ${groupId}`,
-
-                            link:
-                                `https://www.roblox.com/groups/${groupId}`,
-
-                            unido:
-                                false,
-
-                            dias:
-                                null,
-
-                            requerido:
-                                config.dias,
-
-                            elegible:
-                                false,
-
-                            icono:
-                                "⚠️",
-
-                            texto
-                        });
-                    }
+                for (const groupId of groupIds) {
+                    const config = grupos[groupId];
+                    const membership = membresias.get(String(groupId));
+                    const grupo = membership?.group || {
+                        id: groupId,
+                        name: config.name || `Grupo ${groupId}`
+                    };
+                    resultados.push(crearResultado(grupo, config, Boolean(membership)));
                 }
 
                 return interaction.editReply({
@@ -2706,6 +1986,88 @@ client.on(
                 return interaction.editReply(
                     "❌ Ocurrió un error realizando la verificación."
                 );
+            }
+        }
+
+        // ====================================================
+        // TOP 10 COMPRADORES
+        // ====================================================
+
+        if (interaction.commandName === 'top') {
+            const db = cargarDB();
+            const guildData = db[interaction.guild.id] || {};
+            const config = guildData.kaamstore || { usuarios: {} };
+            const ranking = Object.entries(config.usuarios || {})
+                .map(([id, datos]) => ({ id, robux: Number(datos.robuxTotales || 0), compras: Number(datos.compras || 0) }))
+                .filter(x => x.robux > 0)
+                .sort((a, b) => b.robux - a.robux)
+                .slice(0, 10);
+
+            if (!ranking.length) {
+                return interaction.reply({ content: 'Todavía no hay compras registradas.', ephemeral: false });
+            }
+
+            const lineas = ranking.map((item, index) =>
+                `**${index + 1}.** <@${item.id}> — ${ROBUX_EMOJI} **${formatearRobux(item.robux)} Robux** · ${item.compras} compra(s)`
+            );
+            const embed = new EmbedBuilder()
+                .setColor(0xF1C40F)
+                .setTitle('🏆 Top 10 compradores de KaamStore')
+                .setDescription(lineas.join('\n'))
+                .setFooter({ text: 'Ranking por Robux comprados en este servidor' })
+                .setTimestamp();
+            return interaction.reply({ embeds: [embed] });
+        }
+
+        // ====================================================
+        // QUITAR COMPRA
+        // ====================================================
+
+        if (interaction.commandName === 'quitarcompra') {
+            if (!esOwner(interaction)) {
+                return interaction.reply({ content: '❌ Solo el Owner puede utilizar este comando.', ephemeral: true });
+            }
+            await interaction.deferReply({ ephemeral: true });
+            try {
+                const usuario = interaction.options.getUser('usuario');
+                const referencia = interaction.options.getString('referencia').trim();
+                const db = cargarDB();
+                const config = obtenerConfigKaamStore(db, interaction.guild.id);
+                const datos = config.usuarios[usuario.id];
+                if (!datos || !Array.isArray(datos.historial) || !datos.historial.length) {
+                    return interaction.editReply('❌ Este cliente no tiene compras en el historial.');
+                }
+                const indice = datos.historial.findIndex(c => String(c.referencia).toLowerCase() === referencia.toLowerCase());
+                if (indice === -1) {
+                    return interaction.editReply('❌ No encontré esa referencia en el historial de ese cliente.');
+                }
+                const [eliminada] = datos.historial.splice(indice, 1);
+                // Recalcular desde el historial evita descuadres y conserva el precio histórico.
+                datos.robuxTotales = datos.historial.reduce((sum, c) => sum + Number(c.cantidad || 0), 0);
+                datos.dineroGastado = Number(datos.historial.reduce((sum, c) => sum + Number(c.precio || 0), 0).toFixed(2));
+                datos.compras = datos.historial.length;
+                guardarDB(db);
+
+                try {
+                    await actualizarRoles(interaction.guild, usuario.id, datos.robuxTotales, config);
+                } catch (roleError) {
+                    console.error('❌ Error actualizando roles tras quitar compra:', roleError);
+                }
+
+                return interaction.editReply({ embeds: [new EmbedBuilder()
+                    .setColor(0xE74C3C)
+                    .setTitle('🗑️ Compra eliminada')
+                    .setDescription(`Se eliminó la compra de **${usuario.tag}**.`)
+                    .addFields(
+                        { name: 'Referencia', value: `\`${eliminada.referencia}\``, inline: true },
+                        { name: 'Robux eliminados', value: `${formatearRobux(Number(eliminada.cantidad || 0))}`, inline: true },
+                        { name: 'Nuevo total', value: `${formatearRobux(datos.robuxTotales)} Robux`, inline: true }
+                    )
+                    .setFooter({ text: 'El perfil y el ranking se actualizaron con el historial restante.' })
+                    .setTimestamp()] });
+            } catch (error) {
+                console.error('❌ ERROR QUITARCOMPRA:', error);
+                return interaction.editReply('❌ Ocurrió un error eliminando la compra.');
             }
         }
 
@@ -3099,10 +2461,6 @@ client.on(
                     datos.robuxTotales || 0
                 ) <= 0
             ) {
-
-                // IMPORTANTE:
-                // NO ephemeral.
-                // El perfil será público.
 
                 return interaction.reply({
 
