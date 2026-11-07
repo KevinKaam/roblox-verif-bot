@@ -8,6 +8,9 @@ const {
     ButtonBuilder,
     ButtonStyle,
     ActionRowBuilder,
+    ModalBuilder,
+    TextInputBuilder,
+    TextInputStyle,
     ChannelType
 } = require("discord.js");
 
@@ -410,6 +413,69 @@ async function obtenerGruposUsuarioPublicos(userId) {
 }
 
 // ============================================================
+// ROBLOX OPEN CLOUD - GRUPO Y MEMBRESÍA
+// La API Key se guarda cifrada por servidor en la base de datos.
+// ============================================================
+
+async function obtenerGrupoOpenCloud(groupId, apiKey) {
+    try {
+        const response = await robloxRequest(
+            "get",
+            `https://apis.roblox.com/cloud/v2/groups/${groupId}`,
+            {
+                headers: {
+                    "x-api-key": apiKey,
+                    "Accept": "application/json"
+                },
+                timeout: 15000
+            }
+        );
+        return response.data;
+    } catch (error) {
+        const status = error.response?.status;
+        if (status === 401) throw new Error("API_KEY_INVALID");
+        if (status === 403) throw new Error("API_KEY_FORBIDDEN");
+        if (status === 404) throw new Error("GROUP_NOT_FOUND");
+        if (status === 429) throw new Error("ROBLOX_RATE_LIMIT");
+        throw error;
+    }
+}
+
+async function obtenerMembresiaOpenCloud(groupId, userId, apiKey) {
+    try {
+        const response = await robloxRequest(
+            "get",
+            `https://apis.roblox.com/cloud/v2/groups/${groupId}/memberships`,
+            {
+                params: {
+                    maxPageSize: 10,
+                    filter: `user == 'users/${userId}'`
+                },
+                headers: {
+                    "x-api-key": apiKey,
+                    "Accept": "application/json"
+                },
+                timeout: 15000
+            }
+        );
+        return (response.data?.groupMemberships || [])[0] || null;
+    } catch (error) {
+        const status = error.response?.status;
+        if (status === 401) throw new Error("API_KEY_INVALID");
+        if (status === 403) throw new Error("API_KEY_FORBIDDEN");
+        if (status === 404) throw new Error("GROUP_NOT_FOUND");
+        if (status === 429) throw new Error("ROBLOX_RATE_LIMIT");
+        throw error;
+    }
+}
+
+function obtenerApiKeyServidor(db, guildId) {
+    const cifrada = db[guildId]?.robloxApiKey;
+    if (!cifrada) return null;
+    return descifrar(cifrada);
+}
+
+// ============================================================
 // CALCULAR DÍAS
 // ============================================================
 
@@ -449,27 +515,51 @@ function calcularDias(createTime) {
 
 function crearResultado(grupo, config, membership) {
     const groupId = String(grupo.id || config.groupId);
-    const nombre = grupo.name || config.name || `Grupo ${groupId}`;
+    const nombre = grupo.displayName || grupo.name || config.name || `Grupo ${groupId}`;
     const link = `https://www.roblox.com/groups/${groupId}`;
     const insigniaGrupo = grupo.hasVerifiedBadge ? ROBLOX_VERIFIED : ROBLOX_LOGO;
+    const requerido = Number(config.dias || (config.verificado ? 3 : 15));
 
     if (!membership) {
         return {
             groupId, nombre, link, insigniaGrupo,
-            unido: false, dias: null, requerido: null,
+            unido: false, dias: null, requerido,
             elegible: false, pendiente: false,
             icono: STATUS_MISSING,
             texto: "No pertenece al grupo"
         };
     }
 
+    const fechaUnion = membership.createTime || null;
+    const dias = calcularDias(fechaUnion);
     const roleName = membership.role?.name;
+
+    if (dias === null) {
+        return {
+            groupId, nombre, link, insigniaGrupo,
+            unido: true, dias: null, requerido,
+            fechaUnion, elegible: false, pendiente: true,
+            icono: STATUS_WAITING,
+            texto: `Miembro${roleName ? ` · Rango: ${roleName}` : ""} · No se pudo leer la fecha de ingreso`
+        };
+    }
+
+    if (dias >= requerido) {
+        return {
+            groupId, nombre, link, insigniaGrupo,
+            unido: true, dias, requerido,
+            fechaUnion, elegible: true, pendiente: false,
+            icono: STATUS_ELIGIBLE,
+            texto: `Cumple ${dias}/${requerido} días${roleName ? ` · Rango: ${roleName}` : ""}`
+        };
+    }
+
     return {
         groupId, nombre, link, insigniaGrupo,
-        unido: true, dias: null, requerido: null,
-        elegible: true, pendiente: false,
-        icono: STATUS_ELIGIBLE,
-        texto: roleName ? `Miembro · Rango: ${roleName}` : "Miembro del grupo"
+        unido: true, dias, requerido,
+        fechaUnion, elegible: false, pendiente: true,
+        icono: STATUS_WAITING,
+        texto: `Lleva ${dias}/${requerido} días · Le faltan ${requerido - dias} días${roleName ? ` · Rango: ${roleName}` : ""}`
     };
 }
 
@@ -511,7 +601,7 @@ function crearEmbed(userId, resultados, discordUser, displayName) {
     if (!resultados.length) embed.addFields({ name: "📭 Sin grupos", value: "No hay grupos configurados en este servidor." });
 
     if (avatar) embed.setThumbnail(avatar);
-    embed.setFooter({ text: "KaamStore BOT • Verificación pública de Roblox" }).setTimestamp();
+    embed.setFooter({ text: "KaamStore BOT • Roblox Open Cloud" }).setTimestamp();
     return embed;
 }
 
@@ -603,7 +693,7 @@ function crearTutorial() {
         )
 
         .setDescription(
-            "El bot consulta la información pública de Roblox. No necesitas API Key ni configurar Open Cloud."
+            "Configura tu API Key de Roblox una sola vez con `/api`. El bot la guarda cifrada y la reutiliza para todos los grupos de este servidor."
         )
 
         .addFields(
@@ -637,7 +727,7 @@ function crearTutorial() {
                     "4️⃣ Permisos",
 
                 value:
-                    "Solo necesitas el ID o enlace público del grupo."
+                    "Guarda primero la API Key con `/api` y después añade cada grupo por su ID."
             },
 
             {
@@ -645,7 +735,7 @@ function crearTutorial() {
                     "5️⃣ Añadir grupo",
 
                 value:
-                    "`/addgroup group_id:123456`"
+                    "1. Ejecuta `/api` y pega la clave en el formulario privado.\n2. Usa `/addgroup` con el ID y el estado de verificación."
             },
 
             {
@@ -662,7 +752,7 @@ function crearTutorial() {
                     "⚠️ Seguridad",
 
                 value:
-                    "Nunca publiques tu API Key."
+                    "La API Key se almacena cifrada. No la compartas ni la publiques."
             }
         )
 
@@ -1429,15 +1519,31 @@ client.once(
                 ),
 
             // ------------------------------------------------
-            // ADDGROUP - SOLO INFORMACIÓN PÚBLICA
+            // API - CONFIGURAR CLAVE UNA SOLA VEZ POR SERVIDOR
+            // ------------------------------------------------
+            new SlashCommandBuilder()
+                .setName("api")
+                .setDescription("Configura de forma privada la API Key de Roblox para este servidor"),
+
+            // ------------------------------------------------
+            // ADDGROUP - REQUIERE API KEY CONFIGURADA CON /api
             // ------------------------------------------------
             new SlashCommandBuilder()
                 .setName("addgroup")
-                .setDescription("Añade un grupo público de Roblox")
+                .setDescription("Añade un grupo de Roblox y define sus días requeridos")
                 .addStringOption(option => option
                     .setName("group_id")
-                    .setDescription("ID o URL del grupo")
+                    .setDescription("ID del grupo de Roblox")
                     .setRequired(true)
+                )
+                .addStringOption(option => option
+                    .setName("verificado")
+                    .setDescription("¿El grupo está verificado?")
+                    .setRequired(true)
+                    .addChoices(
+                        { name: "Sí — requiere 3 días", value: "si" },
+                        { name: "No — requiere 15 días", value: "no" }
+                    )
                 ),
 
             // ------------------------------------------------
@@ -1762,12 +1868,66 @@ client.on(
     "interactionCreate",
     async interaction => {
 
-        if (
-            !interaction.isChatInputCommand()
-        ) {
+        // ----------------------------------------------------
+        // FORMULARIO PRIVADO PARA GUARDAR API KEY
+        // ----------------------------------------------------
+        if (interaction.isModalSubmit() && interaction.customId === "kaam_api_key_modal") {
+            if (!esOwner(interaction)) {
+                return interaction.reply({ content: "❌ Solo el Owner puede guardar la API Key.", ephemeral: true });
+            }
 
-            return;
+            const apiKey = interaction.fields.getTextInputValue("roblox_api_key").trim();
+            if (apiKey.length < 12 || /\s/.test(apiKey)) {
+                return interaction.reply({ content: "❌ La API Key parece inválida. Comprueba que la copiaste completa y sin espacios.", ephemeral: true });
+            }
+
+            await interaction.deferReply({ ephemeral: true });
+            try {
+                const db = cargarDB();
+                const guildId = interaction.guild.id;
+                if (!db[guildId]) db[guildId] = {};
+                db[guildId].robloxApiKey = cifrar(apiKey);
+                db[guildId].robloxApiKeyUpdatedAt = new Date().toISOString();
+                guardarDB(db);
+                return interaction.editReply({
+                    embeds: [new EmbedBuilder()
+                        .setColor(0x57F287)
+                        .setTitle("🔐 API Key guardada correctamente")
+                        .setDescription("La API Key quedó almacenada **cifrada** para este servidor. No tendrás que introducirla al añadir cada grupo.")
+                        .addFields(
+                            { name: "🔑 Estado", value: "Configurada · Oculta", inline: true },
+                            { name: "🏠 Alcance", value: "Solo este servidor", inline: true },
+                            { name: "➡️ Siguiente paso", value: "Usa `/addgroup` con el ID y el estado de verificación." }
+                        )
+                        .setFooter({ text: "KaamStore BOT • Roblox Open Cloud" })
+                        .setTimestamp()]
+                });
+            } catch (error) {
+                console.error("❌ ERROR GUARDANDO API KEY:", error);
+                return interaction.editReply("❌ No se pudo guardar la API Key. Comprueba que `ENCRYPTION_SECRET` esté configurada en el hosting.");
+            }
         }
+
+        if (interaction.isChatInputCommand() && interaction.commandName === "api") {
+            if (!esOwner(interaction)) {
+                return interaction.reply({ content: "❌ Solo el Owner puede configurar la API Key.", ephemeral: true });
+            }
+            const modal = new ModalBuilder()
+                .setCustomId("kaam_api_key_modal")
+                .setTitle("Configurar API Key de Roblox");
+            const apiInput = new TextInputBuilder()
+                .setCustomId("roblox_api_key")
+                .setLabel("Pega aquí tu API Key")
+                .setStyle(TextInputStyle.Short)
+                .setPlaceholder("API Key de Roblox")
+                .setRequired(true)
+                .setMinLength(12)
+                .setMaxLength(4000);
+            modal.addComponents(new ActionRowBuilder().addComponents(apiInput));
+            return interaction.showModal(modal);
+        }
+
+        if (!interaction.isChatInputCommand()) return;
 
         // ====================================================
         // TUTORIAL
@@ -1807,6 +1967,9 @@ client.on(
         // ====================================================
         // ADDGROUP - SIN API KEY
         // ====================================================
+        // ====================================================
+        // ADDGROUP - ID + VERIFICACIÓN (3 O 15 DÍAS)
+        // ====================================================
         if (interaction.commandName === "addgroup") {
             if (!esOwner(interaction)) {
                 return interaction.reply({
@@ -1815,56 +1978,63 @@ client.on(
                 });
             }
 
-            const groupInput = interaction.options.getString("group_id");
+            const groupInput = interaction.options.getString("group_id", true);
             const groupId = extraerGroupId(groupInput);
-
+            const verificado = interaction.options.getString("verificado", true);
             if (!groupId) {
-                return interaction.reply({
-                    content: "❌ No pude reconocer el Group ID.",
-                    ephemeral: true
-                });
+                return interaction.reply({ content: "❌ Introduce un ID de grupo de Roblox válido.", ephemeral: true });
             }
 
+            const dias = verificado === "si" ? 3 : 15;
             await interaction.deferReply({ ephemeral: true });
-
             try {
-                const grupo = await obtenerGrupoPublico(groupId);
-                const nombre = grupo.name || `Grupo ${groupId}`;
                 const db = cargarDB();
                 const guildId = interaction.guild.id;
-                if (!db[guildId]) db[guildId] = {};
+                const apiKey = obtenerApiKeyServidor(db, guildId);
+                if (!apiKey) {
+                    return interaction.editReply("❌ Primero configura tu API Key con `/api api_key:TU_API_KEY`. Solo tendrás que hacerlo una vez en este servidor.");
+                }
 
-                // No se guarda ni se solicita ninguna API Key.
+                // Esta llamada confirma que la clave tiene acceso al grupo configurado.
+                const grupo = await obtenerGrupoOpenCloud(groupId, apiKey);
+                const nombre = grupo.displayName || grupo.name || `Grupo ${groupId}`;
+                if (!db[guildId]) db[guildId] = {};
                 db[guildId][groupId] = {
+                    ...(db[guildId][groupId] || {}),
                     groupId,
                     name: nombre,
+                    dias,
+                    verificado: verificado === "si",
+                    metodo: "opencloud",
                     addedBy: interaction.user.id,
-                    addedAt: new Date().toISOString(),
-                    publicCheck: true
+                    addedAt: new Date().toISOString()
                 };
-
                 guardarDB(db);
 
                 return interaction.editReply({
                     embeds: [new EmbedBuilder()
                         .setColor(0x57F287)
-                        .setTitle("✅ Grupo público añadido")
-                        .setDescription(`**${nombre}** quedó configurado para verificar membresía pública.`)
+                        .setTitle("✅ Grupo configurado correctamente")
+                        .setDescription(`**${nombre}** quedó añadido y conectado a Roblox Open Cloud.`)
                         .addFields(
                             { name: "🆔 Group ID", value: `\`${groupId}\``, inline: true },
-                            { name: "🔑 API Key", value: "No necesaria", inline: true },
-                            { name: "🔎 Verificación", value: "Pertenencia al grupo", inline: true }
+                            { name: "⭐ Verificado", value: verificado === "si" ? "Sí" : "No", inline: true },
+                            { name: "⏳ Antigüedad requerida", value: `**${dias} días**`, inline: true },
+                            { name: "🔐 API Key", value: "Usando la clave guardada con `/api`", inline: false }
                         )
                         .setURL(`https://www.roblox.com/groups/${groupId}`)
-                        .setFooter({ text: "KaamStore BOT • Roblox Public API" })
+                        .setFooter({ text: "KaamStore BOT • Roblox Open Cloud" })
                         .setTimestamp()]
                 });
             } catch (error) {
-                console.error("❌ ERROR ADDGROUP PUBLIC:", error.response?.status, error.message);
-                if (error.response?.status === 404) {
-                    return interaction.editReply("❌ No encontré ese grupo. Comprueba el ID o enlace.");
-                }
-                return interaction.editReply("❌ Roblox no permitió consultar el grupo en este momento. Inténtalo de nuevo más tarde.");
+                console.error("❌ ERROR ADDGROUP:", error.response?.status, error.message);
+                const mensajes = {
+                    API_KEY_INVALID: "❌ La API Key guardada es inválida. Vuelve a configurarla con `/api`.",
+                    API_KEY_FORBIDDEN: "❌ La API Key no tiene permisos para consultar ese grupo. Revisa los permisos de Roblox Open Cloud.",
+                    GROUP_NOT_FOUND: "❌ No encontré ese grupo. Comprueba el ID.",
+                    ROBLOX_RATE_LIMIT: "⏳ Roblox está limitando las consultas. Inténtalo más tarde."
+                };
+                return interaction.editReply(mensajes[error.message] || "❌ No se pudo consultar el grupo en Roblox. Revisa los permisos de la API Key e inténtalo de nuevo.");
             }
         }
 
@@ -1907,11 +2077,8 @@ client.on(
                     db[guildId] || {};
 
                 const groupIds =
-                    Object.keys(
-                        grupos
-                    ).filter(
-                        id =>
-                            id !== "kaamstore"
+                    Object.keys(grupos).filter(
+                        id => !["kaamstore", "robloxApiKey", "robloxApiKeyUpdatedAt"].includes(id)
                     );
 
                 if (
@@ -1923,48 +2090,39 @@ client.on(
                     );
                 }
 
-                let memberships;
-                try {
-                    memberships = await obtenerGruposUsuarioPublicos(userId);
-                } catch (error) {
-                    console.error("❌ ERROR PUBLIC ROBLOX GROUPS:", error.response?.status, error.message);
-                    return interaction.editReply(
-                        "❌ Roblox no está respondiendo a la consulta pública. Inténtalo de nuevo en unos segundos."
-                    );
-                }
-
-                const membershipByGroup = new Map();
-                for (const item of memberships) {
-                    const id = item.group?.id;
-                    if (id !== undefined && id !== null) {
-                        membershipByGroup.set(String(id), item);
-                    }
+                const apiKey = obtenerApiKeyServidor(db, guildId);
+                if (!apiKey) {
+                    return interaction.editReply("❌ Este servidor todavía no tiene una API Key configurada. El Owner debe utilizar `/api`.");
                 }
 
                 const resultados = [];
                 for (const groupId of groupIds) {
                     const config = grupos[groupId] || {};
-                    let grupo;
                     try {
-                        grupo = await obtenerGrupoPublico(groupId);
+                        const [grupo, membership] = await Promise.all([
+                            obtenerGrupoOpenCloud(groupId, apiKey),
+                            obtenerMembresiaOpenCloud(groupId, userId, apiKey)
+                        ]);
+                        resultados.push(crearResultado(grupo, config, membership));
                     } catch (error) {
-                        console.error(`❌ Error consultando grupo público ${groupId}:`, error.response?.status || error.message);
+                        console.error(`❌ Error verificando grupo ${groupId}:`, error.response?.status || error.message);
+                        const nombre = config.name || `Grupo ${groupId}`;
                         resultados.push({
                             groupId,
-                            nombre: config.name || `Grupo ${groupId}`,
+                            nombre,
                             link: `https://www.roblox.com/groups/${groupId}`,
+                            insigniaGrupo: ROBLOX_LOGO,
                             unido: false,
                             dias: null,
-                            requerido: null,
+                            requerido: Number(config.dias || (config.verificado ? 3 : 15)),
                             elegible: false,
-                            icono: "⚠️",
-                            texto: "no se pudo consultar Roblox"
+                            pendiente: true,
+                            icono: STATUS_WAITING,
+                            texto: error.message === "API_KEY_FORBIDDEN"
+                                ? "La API Key no tiene permisos para consultar este grupo"
+                                : "No se pudo consultar este grupo en Roblox"
                         });
-                        continue;
                     }
-
-                    const membership = membershipByGroup.get(String(groupId)) || null;
-                    resultados.push(crearResultado(grupo, config, membership));
                 }
 
                 return interaction.editReply({
