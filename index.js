@@ -5,6 +5,7 @@ const {
     REST,
     Routes,
     EmbedBuilder,
+    AttachmentBuilder,
     ButtonBuilder,
     ButtonStyle,
     ActionRowBuilder,
@@ -34,7 +35,7 @@ const OWNER_ID = "1254918801569349676";
 const ROBUX_EMOJI = "<:Robux:1544739089595506698>";
 const ROBLOX_LOGO = "<:RobloxLogo:1551638805834895400>";
 const ROBLOX_VERIFIED = "<:robloxverified:1474655226769309829>";
-const STATUS_ELIGIBLE = "<a:greenverified:1474611766024470672>";
+const STATUS_ELIGIBLE = "<:approved:1474616603839565886>";
 const STATUS_WAITING = "<:orangealert:1474613707857199274>";
 const STATUS_MISSING = "<:redalert:1474613861402284254>";
 const TOP_CROWN = "<a:crown:1474660980884766843>";
@@ -391,6 +392,28 @@ async function obtenerUserId(input) {
 }
 
 // ============================================================
+// PERFIL PÚBLICO DE ROBLOX (NOMBRE, DISPLAY NAME Y AVATAR)
+// ============================================================
+async function obtenerPerfilRoblox(userId) {
+    const [perfilResponse, avatarResponse] = await Promise.all([
+        robloxRequest("get", `https://users.roblox.com/v1/users/${userId}`, { timeout: 15000 }),
+        robloxRequest("get", "https://thumbnails.roblox.com/v1/users/avatar-headshot", {
+            params: { userIds: userId, size: "150x150", format: "Png", isCircular: "false" },
+            timeout: 15000
+        })
+    ]);
+
+    const perfil = perfilResponse.data || {};
+    const avatar = avatarResponse.data?.data?.[0]?.imageUrl || null;
+    return {
+        id: String(userId),
+        username: perfil.name || `Usuario ${userId}`,
+        displayName: perfil.displayName || perfil.name || `Usuario ${userId}`,
+        avatarUrl: avatar
+    };
+}
+
+// ============================================================
 // ROBLOX PUBLIC API - NO REQUIERE API KEY
 // ============================================================
 
@@ -517,7 +540,7 @@ function crearResultado(grupo, config, membership) {
     const groupId = String(grupo.id || config.groupId);
     const nombre = grupo.displayName || grupo.name || config.name || `Grupo ${groupId}`;
     const link = `https://www.roblox.com/groups/${groupId}`;
-    const insigniaGrupo = grupo.hasVerifiedBadge ? ROBLOX_VERIFIED : ROBLOX_LOGO;
+    const insigniaGrupo = config.verificado ? ROBLOX_VERIFIED : ROBLOX_LOGO;
     const requerido = Number(config.dias || (config.verificado ? 3 : 15));
 
     if (!membership) {
@@ -566,42 +589,49 @@ function crearResultado(grupo, config, membership) {
 // ============================================================
 // EMBED DE VERIFICACIÓN — DISEÑO RENOVADO
 // ============================================================
-function crearEmbed(userId, resultados, discordUser, displayName) {
+function crearEmbed(userId, resultados, perfilRoblox) {
     const total = resultados.length;
     const elegibles = resultados.filter(r => r.elegible).length;
     const pendientes = resultados.filter(r => r.pendiente).length;
-    const noUnidos = resultados.filter(r => !r.unido).length;
-    const nombreDiscord = displayName || discordUser?.globalName || discordUser?.username || "Usuario";
-    const avatar = discordUser?.displayAvatarURL({ extension: "png", size: 256 });
+    const noUnidos = resultados.filter(r => !r.unido && !r.pendiente).length;
+    const unidos = resultados.filter(r => r.unido);
+    const noUnidosLista = resultados.filter(r => !r.unido && !r.pendiente);
 
     const renderGrupo = r => `${r.icono} ${r.insigniaGrupo || ROBLOX_LOGO} **[${r.nombre}](${r.link})**\n> ${r.texto}`;
-    const listaElegibles = resultados.filter(r => r.elegible).map(renderGrupo);
-    const listaPendientes = resultados.filter(r => r.pendiente).map(renderGrupo);
-    const listaNoUnidos = resultados.filter(r => !r.unido).map(renderGrupo);
+    const dividirEnCampos = (items, titulo) => {
+        const bloques = [];
+        let actual = "";
+        for (const item of items) {
+            const candidato = actual ? `${actual}\n\n${item}` : item;
+            if (candidato.length > 1024) {
+                if (actual) bloques.push(actual);
+                actual = item.slice(0, 1024);
+            } else actual = candidato;
+        }
+        if (actual) bloques.push(actual);
+        return bloques.map((value, i) => ({
+            name: i === 0 ? `${titulo} (${items.length})` : `${titulo} (cont. ${i + 1})`,
+            value,
+            inline: false
+        }));
+    };
 
-    const descripcion = [
-        `👤 **${nombreDiscord}** · @${discordUser?.username || "usuario"}`,
-        `🆔 Discord: \`${discordUser?.id || "—"}\`  •  Roblox: \`${userId}\``,
-        `[🌐 Abrir perfil de Roblox](https://www.roblox.com/users/${userId}/profile)`
-    ].join("\n");
+    const nombre = perfilRoblox.displayName && perfilRoblox.displayName !== perfilRoblox.username
+        ? `${perfilRoblox.username} (${perfilRoblox.displayName})`
+        : perfilRoblox.username;
 
     const embed = new EmbedBuilder()
-        .setColor(elegibles === total ? 0x2ECC71 : (pendientes > 0 ? 0xF1C40F : 0x5865F2))
-        .setTitle("🔎 VERIFICACIÓN DE GRUPOS ROBLOX")
-        .setDescription(descripcion)
-        .addFields({
-            name: "📊 RESUMEN DE VERIFICACIÓN",
-            value: `${STATUS_ELIGIBLE} **${elegibles}** elegibles   ${STATUS_WAITING} **${pendientes}** en espera   ${STATUS_MISSING} **${noUnidos}** sin unirse\n📦 **${total}** grupos configurados`,
-            inline: false
-        });
+        .setColor(elegibles === total && total > 0 ? 0x2ECC71 : (pendientes > 0 ? 0xF1C40F : 0x5865F2))
+        .setTitle("Grupos Roblox")
+        .setDescription(`🆔 **ID Roblox:** \`${userId}\`\n\n**Resumen**\n${STATUS_ELIGIBLE} Elegible: **${elegibles} / ${total}**\n${STATUS_MISSING} Sin unirse: **${noUnidos}**\n${STATUS_WAITING} En espera: **${pendientes}**`)
+        .addFields(
+            ...dividirEnCampos(unidos.map(renderGrupo), "👤 Grupos donde ya está"),
+            ...dividirEnCampos(noUnidosLista.map(renderGrupo), "📌 Grupos donde todavía no está")
+        );
 
-    if (listaElegibles.length) embed.addFields({ name: `${STATUS_ELIGIBLE} GRUPOS ELEGIBLES (${listaElegibles.length})`, value: listaElegibles.join("\n\n").slice(0, 1024), inline: false });
-    if (listaPendientes.length) embed.addFields({ name: `${STATUS_WAITING} GRUPOS EN ESPERA (${listaPendientes.length})`, value: listaPendientes.join("\n\n").slice(0, 1024), inline: false });
-    if (listaNoUnidos.length) embed.addFields({ name: `${STATUS_MISSING} GRUPOS PENDIENTES DE UNIRSE (${listaNoUnidos.length})`, value: listaNoUnidos.join("\n\n").slice(0, 1024), inline: false });
-    if (!resultados.length) embed.addFields({ name: "📭 Sin grupos", value: "No hay grupos configurados en este servidor." });
-
-    if (avatar) embed.setThumbnail(avatar);
-    embed.setFooter({ text: "KaamStore BOT • Roblox Open Cloud" }).setTimestamp();
+    embed.setAuthor({ name: nombre, ...(perfilRoblox.avatarUrl ? { iconURL: perfilRoblox.avatarUrl } : {}) });
+    if (perfilRoblox.avatarUrl) embed.setThumbnail(perfilRoblox.avatarUrl);
+    embed.setFooter({ text: "KaamStore BOT • Verificación de Roblox" }).setTimestamp();
     return embed;
 }
 
@@ -1474,6 +1504,100 @@ function crearSinComprasEmbed(
 }
 
 // ============================================================
+// ESTADÍSTICAS DE VENTAS - ZONA HORARIA DE QUEBEC
+// ============================================================
+const SALES_TIME_ZONE = "America/Toronto";
+
+function fechaLocalQuebec(date = new Date()) {
+    const partes = new Intl.DateTimeFormat("en-CA", {
+        timeZone: SALES_TIME_ZONE,
+        year: "numeric", month: "2-digit", day: "2-digit"
+    }).formatToParts(date);
+    const valores = Object.fromEntries(partes.map(p => [p.type, p.value]));
+    return `${valores.year}-${valores.month}-${valores.day}`;
+}
+
+function sumarDiasFecha(fecha, dias) {
+    const [y, m, d] = fecha.split("-").map(Number);
+    const date = new Date(Date.UTC(y, m - 1, d + dias));
+    return date.toISOString().slice(0, 10);
+}
+
+function inicioSemana(fecha) {
+    const [y, m, d] = fecha.split("-").map(Number);
+    const dia = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+    const diferencia = dia === 0 ? -6 : 1 - dia;
+    return sumarDiasFecha(fecha, diferencia);
+}
+
+function obtenerComprasServidor(config) {
+    const compras = [];
+    for (const [userId, datos] of Object.entries(config.usuarios || {})) {
+        for (const compra of (Array.isArray(datos.historial) ? datos.historial : [])) {
+            if (!compra || !compra.fecha) continue;
+            const fecha = new Date(compra.fecha);
+            if (Number.isNaN(fecha.getTime())) continue;
+            compras.push({
+                ...compra,
+                userId,
+                cantidad: Number(compra.cantidad || 0),
+                precio: Number(compra.precio || 0),
+                fechaLocal: fechaLocalQuebec(fecha)
+            });
+        }
+    }
+    return compras;
+}
+
+function resumirCompras(compras) {
+    return {
+        robux: compras.reduce((s, c) => s + c.cantidad, 0),
+        ingresos: compras.reduce((s, c) => s + c.precio, 0),
+        cantidad: compras.length
+    };
+}
+
+function campoEstadistica(titulo, resumen) {
+    return {
+        name: titulo,
+        value: `${ROBUX_EMOJI} **${formatearRobux(resumen.robux)} Robux vendidos**\n💵 **$${formatearUSD(resumen.ingresos)} USD ingresados**\n🛍️ **${formatearRobux(resumen.cantidad)} compra(s)**`,
+        inline: false
+    };
+}
+
+function crearEmbedEstadisticas(config) {
+    const hoy = fechaLocalQuebec();
+    const semanaInicio = inicioSemana(hoy);
+    const semanaFin = sumarDiasFecha(semanaInicio, 6);
+    const mesInicio = `${hoy.slice(0, 7)}-01`;
+    const compras = obtenerComprasServidor(config);
+    const dia = resumirCompras(compras.filter(c => c.fechaLocal === hoy));
+    const semana = resumirCompras(compras.filter(c => c.fechaLocal >= semanaInicio && c.fechaLocal <= hoy));
+    const mes = resumirCompras(compras.filter(c => c.fechaLocal >= mesInicio && c.fechaLocal <= hoy));
+    const total = resumirCompras(compras);
+
+    return new EmbedBuilder()
+        .setColor(0x5865F2)
+        .setTitle("📊 ESTADÍSTICAS DE KAAMSTORE")
+        .setDescription(`Resumen de ventas · Zona horaria: **Quebec (America/Toronto)**\n📅 Hoy: **${hoy}**\n📆 Semana: **${semanaInicio} al ${semanaFin}** (lunes a domingo; acumulado hasta hoy)\n🗓️ Mes: **${mesInicio} al ${hoy}** (acumulado del mes)`)
+        .addFields(
+            campoEstadistica("☀️ VENTAS DE HOY", dia),
+            campoEstadistica("📆 VENTAS DE ESTA SEMANA", semana),
+            campoEstadistica("🗓️ VENTAS DE ESTE MES", mes),
+            campoEstadistica("🏆 VENTAS HISTÓRICAS", total)
+        )
+        .setFooter({ text: "Las estadísticas se calculan desde el historial de compras vigente" })
+        .setTimestamp();
+}
+
+function recalcularTotalesUsuario(datos) {
+    const historial = Array.isArray(datos.historial) ? datos.historial : [];
+    datos.robuxTotales = historial.reduce((s, c) => s + Number(c.cantidad || 0), 0);
+    datos.dineroGastado = Number(historial.reduce((s, c) => s + Number(c.precio || 0), 0).toFixed(2));
+    datos.compras = historial.length;
+}
+
+// ============================================================
 // REGISTRO DE COMANDOS
 // ============================================================
 
@@ -1804,6 +1928,24 @@ client.once(
 
             ,
             new SlashCommandBuilder()
+                .setName("comprasdata")
+                .setDescription("Descarga un respaldo de todas las compras de este servidor"),
+            new SlashCommandBuilder()
+                .setName("datacompras")
+                .setDescription("Restaura las compras desde un respaldo JSON")
+                .addAttachmentOption(option => option.setName("archivo").setDescription("Archivo JSON generado por /comprasdata").setRequired(true)),
+            new SlashCommandBuilder()
+                .setName("estadisticas")
+                .setDescription("Muestra las ventas diarias, semanales y mensuales de KaamStore"),
+            new SlashCommandBuilder()
+                .setName("comprobante")
+                .setDescription("Genera un comprobante de una compra registrada")
+                .addStringOption(option => option
+                    .setName("referencia")
+                    .setDescription("Referencia de la compra, por ejemplo KSG-ABCDEFG")
+                    .setRequired(true)
+                ),
+            new SlashCommandBuilder()
                 .setName("top")
                 .setDescription("Muestra el top 10 de compradores de KaamStore"),
             new SlashCommandBuilder()
@@ -2061,11 +2203,10 @@ client.on(
                     );
 
                 if (!userId) {
-
-                    return interaction.editReply(
-                        "❌ No encontré ese usuario de Roblox."
-                    );
+                    return interaction.editReply("❌ No encontré ese usuario de Roblox.");
                 }
+
+                const perfilRoblox = await obtenerPerfilRoblox(userId);
 
                 const db =
                     cargarDB();
@@ -2132,8 +2273,7 @@ client.on(
                         crearEmbed(
                             userId,
                             resultados,
-                            interaction.user,
-                            interaction.member?.displayName || interaction.user.globalName || interaction.user.username
+                            perfilRoblox
                         )
                     ],
 
@@ -2917,6 +3057,175 @@ client.on(
                 return interaction.editReply(
                     "❌ Ocurrió un error registrando la compra."
                 );
+            }
+        }
+
+        // ====================================================
+        // COMPROBANTE DE COMPRA
+        // ====================================================
+        if (interaction.commandName === "comprobante") {
+            if (!esOwner(interaction)) {
+                return interaction.reply({
+                    content: "❌ Solo el Owner puede generar comprobantes de compras.",
+                    ephemeral: true
+                });
+            }
+
+            const referencia = interaction.options.getString("referencia", true).trim().toUpperCase();
+            if (!/^KSG-[A-Z0-9]{7}$/.test(referencia)) {
+                return interaction.reply({
+                    content: "❌ La referencia no tiene un formato válido. Ejemplo: `KSG-ABCDEFG`.",
+                    ephemeral: true
+                });
+            }
+
+            await interaction.deferReply();
+            try {
+                const db = cargarDB();
+                const config = obtenerConfigKaamStore(db, interaction.guild.id);
+                let encontrada = null;
+
+                for (const [userId, datos] of Object.entries(config.usuarios || {})) {
+                    const historial = Array.isArray(datos.historial) ? datos.historial : [];
+                    const compra = historial.find(c => String(c.referencia || "").toUpperCase() === referencia);
+                    if (compra) {
+                        encontrada = { userId, datos, compra };
+                        break;
+                    }
+                }
+
+                if (!encontrada) {
+                    return interaction.editReply({
+                        content: `❌ No encontré ninguna compra con la referencia **${referencia}** en este servidor.`
+                    });
+                }
+
+                const { userId, datos, compra } = encontrada;
+                const fechaCompra = new Date(compra.fecha);
+                if (Number.isNaN(fechaCompra.getTime())) {
+                    return interaction.editReply("❌ La compra existe, pero su fecha guardada no es válida. No puedo generar un comprobante correcto.");
+                }
+
+                let cliente = null;
+                try { cliente = await client.users.fetch(userId); } catch (_) {}
+                const nombreCliente = cliente ? `${cliente.username}${cliente.globalName ? ` (${cliente.globalName})` : ""}` : `Usuario ${userId}`;
+                const fechaTexto = new Intl.DateTimeFormat("es-CA", {
+                    timeZone: SALES_TIME_ZONE,
+                    dateStyle: "long",
+                    timeStyle: "short"
+                }).format(fechaCompra);
+
+                const embed = new EmbedBuilder()
+                    .setColor(0x57F287)
+                    .setTitle("🧾 COMPROBANTE DE COMPRA")
+                    .setDescription(`**KAAMSTORE**\nTu compra figura como registrada en nuestro sistema.\n\n<:approved:1474616603839565886> **COMPRA REGISTRADA**`)
+                    .addFields(
+                        { name: "🧾 Referencia", value: `\`${referencia}\``, inline: true },
+                        { name: "👤 Cliente", value: `<@${userId}>\n${nombreCliente}`, inline: true },
+                        { name: `${ROBUX_EMOJI} Robux comprados`, value: `**${formatearRobux(compra.cantidad)} Robux**`, inline: true },
+                        { name: "💵 Importe registrado", value: `**$${formatearUSD(compra.precio)} USD**`, inline: true },
+                        { name: "📌 Precio base al registrar", value: `1K = **$${formatearUSD(compra.precioBase ?? config.precio1k)} USD**`, inline: true },
+                        { name: "📅 Fecha", value: fechaTexto, inline: true },
+                        { name: `${ROBUX_EMOJI} Robux acumulados del cliente`, value: `**${formatearRobux(compra.robuxTotales ?? datos.robuxTotales)} Robux**`, inline: true },
+                        { name: "🛍️ Compras acumuladas", value: `**${formatearRobux(datos.compras ?? (datos.historial || []).length)}**`, inline: true }
+                    )
+                    .setFooter({ text: "KaamStore BOT • Comprobante generado a partir del historial de compras" })
+                    .setTimestamp(fechaCompra);
+
+                if (cliente) embed.setThumbnail(cliente.displayAvatarURL({ size: 256 }));
+                return interaction.editReply({ embeds: [embed] });
+            } catch (error) {
+                console.error("❌ ERROR COMPROBANTE:", error);
+                return interaction.editReply("❌ Ocurrió un error al generar el comprobante. Inténtalo nuevamente.");
+            }
+        }
+
+        // ====================================================
+        // RESPALDO DE COMPRAS (EXPORTAR)
+        // ====================================================
+        if (interaction.commandName === "comprasdata") {
+            if (!esOwner(interaction)) return interaction.reply({ content: "❌ Solo el Owner puede generar respaldos.", ephemeral: true });
+            await interaction.deferReply({ ephemeral: true });
+            try {
+                const db = cargarDB();
+                const config = obtenerConfigKaamStore(db, interaction.guild.id);
+                const backup = {
+                    app: "KaamStore BOT",
+                    type: "kaamstore_purchases_backup",
+                    version: 1,
+                    guildId: interaction.guild.id,
+                    exportedAt: new Date().toISOString(),
+                    usuarios: config.usuarios || {}
+                };
+                const buffer = Buffer.from(JSON.stringify(backup, null, 2), "utf8");
+                const archivo = new AttachmentBuilder(buffer, { name: `kaamstore-compras-${interaction.guild.id}-${Date.now()}.json` });
+                return interaction.editReply({ content: `✅ Respaldo generado. Incluye el historial de **${Object.keys(backup.usuarios).length} cliente(s)**. Guárdalo fuera del hosting.`, files: [archivo] });
+            } catch (error) {
+                console.error("❌ ERROR COMPRASDATA:", error);
+                return interaction.editReply("❌ No pude generar el respaldo de compras.");
+            }
+        }
+
+        // ====================================================
+        // RESTAURAR COMPRAS DESDE RESPALDO JSON
+        // ====================================================
+        if (interaction.commandName === "datacompras") {
+            if (!esOwner(interaction)) return interaction.reply({ content: "❌ Solo el Owner puede restaurar respaldos.", ephemeral: true });
+            await interaction.deferReply({ ephemeral: true });
+            try {
+                const adjunto = interaction.options.getAttachment("archivo", true);
+                if (!adjunto.name.toLowerCase().endsWith(".json") || adjunto.size > 20 * 1024 * 1024) {
+                    return interaction.editReply("❌ Adjunta un archivo `.json` válido de máximo 20 MB.");
+                }
+                const response = await axios.get(adjunto.url, { responseType: "arraybuffer", timeout: 30000, maxContentLength: 20 * 1024 * 1024 });
+                const backup = JSON.parse(Buffer.from(response.data).toString("utf8"));
+                if (backup.type !== "kaamstore_purchases_backup" || backup.version !== 1 || !backup.usuarios || typeof backup.usuarios !== "object") {
+                    return interaction.editReply("❌ El archivo no parece ser un respaldo válido de KaamStore.");
+                }
+                if (String(backup.guildId) !== String(interaction.guild.id)) {
+                    return interaction.editReply("❌ Este respaldo pertenece a otro servidor. No se importó nada.");
+                }
+
+                const db = cargarDB();
+                const config = obtenerConfigKaamStore(db, interaction.guild.id);
+                let importadas = 0;
+                let duplicadas = 0;
+                for (const [userId, datosBackup] of Object.entries(backup.usuarios)) {
+                    if (!datosBackup || typeof datosBackup !== "object") continue;
+                    if (!config.usuarios[userId]) config.usuarios[userId] = { robuxTotales: 0, dineroGastado: 0, compras: 0, historial: [] };
+                    const actual = config.usuarios[userId];
+                    if (!Array.isArray(actual.historial)) actual.historial = [];
+                    const existentes = new Set(actual.historial.map(c => c.referencia ? `ref:${c.referencia}` : `sig:${c.fecha}|${c.cantidad}|${c.precio}`));
+                    for (const compra of (Array.isArray(datosBackup.historial) ? datosBackup.historial : [])) {
+                        if (!compra || typeof compra !== "object") continue;
+                        const clave = compra.referencia ? `ref:${compra.referencia}` : `sig:${compra.fecha}|${compra.cantidad}|${compra.precio}`;
+                        if (existentes.has(clave)) { duplicadas++; continue; }
+                        actual.historial.push(compra);
+                        existentes.add(clave);
+                        importadas++;
+                    }
+                    recalcularTotalesUsuario(actual);
+                }
+                guardarDB(db);
+                return interaction.editReply(`✅ **Respaldo restaurado correctamente.**\n\n🛍️ Compras nuevas importadas: **${importadas}**\n♻️ Compras duplicadas omitidas: **${duplicadas}**\n👥 Clientes procesados: **${Object.keys(backup.usuarios).length}**\n\nLas compras que ya existían se conservaron.`);
+            } catch (error) {
+                console.error("❌ ERROR DATACOMPRAS:", error);
+                return interaction.editReply("❌ No se pudo restaurar el respaldo. Comprueba que el JSON esté completo y no modificado.");
+            }
+        }
+
+        // ====================================================
+        // ESTADÍSTICAS DE VENTAS
+        // ====================================================
+        if (interaction.commandName === "estadisticas") {
+            if (!esOwner(interaction)) return interaction.reply({ content: "❌ Solo el Owner puede consultar las estadísticas internas.", ephemeral: true });
+            try {
+                const db = cargarDB();
+                const config = obtenerConfigKaamStore(db, interaction.guild.id);
+                return interaction.reply({ embeds: [crearEmbedEstadisticas(config)], ephemeral: true });
+            } catch (error) {
+                console.error("❌ ERROR ESTADISTICAS:", error);
+                return interaction.reply({ content: "❌ No pude calcular las estadísticas de ventas.", ephemeral: true });
             }
         }
 
